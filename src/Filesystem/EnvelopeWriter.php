@@ -6,6 +6,8 @@ namespace AuraBox\Jmix\Filesystem;
 
 use AuraBox\Jmix\Exceptions\JmixException;
 use AuraBox\Jmix\Encryption\PayloadEncryptor;
+use FilesystemIterator;
+use Random\RandomException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 
@@ -18,6 +20,9 @@ class EnvelopeWriter
     private string $payloadPath;
     private bool $isEncrypted = false;
 
+    /**
+     * @throws JmixException
+     */
     public function __construct(string $outputPath, string $envelopeId)
     {
         $this->envelopeRoot = rtrim($outputPath, '/') . '/' . $envelopeId . '.JMIX';
@@ -36,6 +41,7 @@ class EnvelopeWriter
 
     /**
      * Write JSON data to a file relative to the envelope root
+     * @throws JmixException
      */
     public function writeJson(string $relativePath, array $data): void
     {
@@ -43,12 +49,11 @@ class EnvelopeWriter
 
         // Ensure directory exists
         $dir = dirname($fullPath);
-        if (!is_dir($dir)) {
-            if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
-                throw new JmixException("Failed to create directory: {$dir}");
-            }
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            throw new JmixException("Failed to create directory: {$dir}");
         }
 
+        /** @noinspection JsonEncodingApiUsageInspection */
         $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         if (json_last_error() !== JSON_ERROR_NONE) {
             throw new JmixException('Failed to encode JSON: ' . json_last_error_msg());
@@ -61,6 +66,7 @@ class EnvelopeWriter
 
     /**
      * Copy a file to the envelope with the given relative path
+     * @throws JmixException
      */
     public function copyFile(string $sourcePath, string $relativePath): void
     {
@@ -68,10 +74,8 @@ class EnvelopeWriter
 
         // Ensure directory exists
         $dir = dirname($destPath);
-        if (!is_dir($dir)) {
-            if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
-                throw new JmixException("Failed to create directory: {$dir}");
-            }
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            throw new JmixException("Failed to create directory: {$dir}");
         }
 
         if (!copy($sourcePath, $destPath)) {
@@ -84,6 +88,7 @@ class EnvelopeWriter
 
     /**
      * Copy an entire DICOM directory tree to payload/dicom/
+     * @throws JmixException
      */
     public function copyDicomTree(string $dicomPath): void
     {
@@ -92,14 +97,12 @@ class EnvelopeWriter
         }
 
         $dicomDestPath = $this->payloadPath . '/dicom';
-        if (!is_dir($dicomDestPath)) {
-            if (!mkdir($dicomDestPath, 0755, true) && !is_dir($dicomDestPath)) {
-                throw new JmixException("Failed to create DICOM directory: {$dicomDestPath}");
-            }
+        if (!is_dir($dicomDestPath) && !mkdir($dicomDestPath, 0755, true) && !is_dir($dicomDestPath)) {
+            throw new JmixException("Failed to create DICOM directory: {$dicomDestPath}");
         }
 
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dicomPath, RecursiveDirectoryIterator::SKIP_DOTS),
+            new RecursiveDirectoryIterator($dicomPath, FilesystemIterator::SKIP_DOTS),
             RecursiveIteratorIterator::SELF_FIRST
         );
 
@@ -110,10 +113,8 @@ class EnvelopeWriter
 
             if ($file->isDir()) {
                 $targetDir = $dicomDestPath . '/' . $relativePath;
-                if (!is_dir($targetDir)) {
-                    if (!mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
-                        throw new JmixException("Failed to create directory: {$targetDir}");
-                    }
+                if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
+                    throw new JmixException("Failed to create directory: {$targetDir}");
                 }
             } elseif ($file->isFile()) {
                 $this->copyFile($file->getPathname(), 'payload/dicom/' . $relativePath);
@@ -134,7 +135,7 @@ class EnvelopeWriter
 
         $files = [];
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($filesPath, RecursiveDirectoryIterator::SKIP_DOTS)
+            new RecursiveDirectoryIterator($filesPath, FilesystemIterator::SKIP_DOTS)
         );
 
         $filesPath = rtrim($filesPath, '/');
@@ -154,7 +155,7 @@ class EnvelopeWriter
         // Sort by file path for consistency
         usort(
             $files,
-            function ($a, $b) {
+            static function ($a, $b) {
                 return strcmp($a['file'], $b['file']);
             }
         );
@@ -174,7 +175,7 @@ class EnvelopeWriter
         }
 
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($filesPath, RecursiveDirectoryIterator::SKIP_DOTS)
+            new RecursiveDirectoryIterator($filesPath, FilesystemIterator::SKIP_DOTS)
         );
 
         foreach ($iterator as $file) {
@@ -200,7 +201,11 @@ class EnvelopeWriter
         }
 
         $encryptor = new PayloadEncryptor();
-        $encryptionResult = $encryptor->encryptPayload($this->payloadPath, $recipientPublicKey);
+        try {
+            $encryptionResult = $encryptor->encryptPayload($this->payloadPath, $recipientPublicKey);
+        } catch (\Exception $e) {
+            throw new JmixException('Error encrypting payload: ' . $e->getMessage(), previous: $e);
+        }
 
         // Remove the original payload directory
         $this->removeDirectory($this->payloadPath);
@@ -228,6 +233,7 @@ class EnvelopeWriter
 
     /**
      * Calculate SHA-256 hash of the payload directory (entire directory structure)
+     * @throws JmixException
      */
     public function calculatePayloadHash(): string
     {
@@ -246,7 +252,7 @@ class EnvelopeWriter
 
         $entries = [];
         $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($this->payloadPath, RecursiveDirectoryIterator::SKIP_DOTS),
+            new RecursiveDirectoryIterator($this->payloadPath, FilesystemIterator::SKIP_DOTS),
             RecursiveIteratorIterator::SELF_FIRST
         );
 

@@ -57,7 +57,8 @@ class JmixBuilderTest extends TestCase
         $this->assertEquals('Doe', $metadata['patient']['name']['family']);
         $this->assertEquals(['Jane'], $metadata['patient']['name']['given']);
         $this->assertEquals('1975-02-14', $metadata['patient']['dob']);
-        $this->assertIsArray($metadata['studies']['series']);
+        $this->assertIsObject($metadata['studies']);
+        // Studies and extensions should be objects (may be empty when no data is available)
 
         // Check audit structure (renamed from transmission)
         $audit = $envelope['audit'];

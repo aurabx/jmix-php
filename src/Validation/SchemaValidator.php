@@ -45,6 +45,14 @@ class SchemaValidator
     }
 
     /**
+     * Validate files manifest against its schema
+     */
+    public function validateFiles(array $data): void
+    {
+        $this->validate($data, 'files.schema.json');
+    }
+
+    /**
      * Generic validation method
      */
     private function validate(array $data, string $schemaFile): void

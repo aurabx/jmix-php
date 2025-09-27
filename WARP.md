@@ -84,6 +84,7 @@ Operational tips for Warp
 - For focused debugging, run a single PHPUnit test or limit to a specific file
 - Use samples/study_1 for testing with realistic DICOM structure (3 series, 15 files total)
 - If schema validation fails, verify the schemas/ path used by SchemaValidator and that the schema files exist and are valid JSON
+- When skipping, using dummy data, or otherwise not completing a feature, add a @todo entry so it can be located later.
 
 Schemas
 - Canonical source: https://github.com/aurabx/jmix (see /schemas)

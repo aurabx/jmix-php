@@ -15,8 +15,9 @@ class DicomProcessor
 {
     /**
      * Process a folder of DICOM files and extract relevant metadata
+     * @throws JmixException
      */
-    public function processDicomFolder(string $dicomPath): array
+    public function processDicomFolder(string $dicomPath, ?array $config = null): array
     {
         $dicomFiles = $this->findDicomFiles($dicomPath);
 
@@ -37,7 +38,7 @@ class DicomProcessor
         ];
 
         foreach ($dicomFiles as $file) {
-            $fileMetadata = $this->processDicomFile($file);
+            $fileMetadata = $this->processDicomFile($file, $config);
             $metadata = $this->mergeMetadata($metadata, $fileMetadata);
         }
 
@@ -58,8 +59,6 @@ class DicomProcessor
 
         foreach ($iterator as $file) {
             if ($file->isFile()) {
-                $filename = $file->getFilename();
-
                 // Check if it might be a DICOM file
                 if ($this->isDicomFile($file->getPathname())) {
                     $files[] = $file->getPathname();
@@ -92,7 +91,7 @@ class DicomProcessor
      * Process a single DICOM file to extract metadata
      * This is a simplified version - in production you'd use a proper DICOM library
      */
-    private function processDicomFile(string $filePath): array
+    private function processDicomFile(string $filePath, ?array $config = null): array
     {
         // Try to use dcmdump if available, otherwise return placeholder data
         if ($this->isDcmdumpAvailable()) {
@@ -102,19 +101,17 @@ class DicomProcessor
             }
         }
 
-        // Fallback to placeholder data
-        $filename = basename($filePath);
-
+        // Fallback: use config data if available, otherwise null
         return [
-            'patient_name' => 'Jane Doe',
-            'patient_id' => 'PAT123456',
-            'patient_dob' => '1975-02-14',
-            'patient_sex' => 'F',
-            'study_description' => 'CT Chest, Abdomen & Pelvis',
-            'study_uid' => '1.2.840.113619.2.312.4120.7934893.' . date('YmdHi'),
-            'series_uid' => '1.2.3.4.5.6.' . hash('crc32', $filename),
-            'modality' => 'CT',
-            'body_part' => 'Chest',
+            'patient_name' => $config['patient']['name'] ?? null,
+            'patient_id' => $config['patient']['id'] ?? null,
+            'patient_dob' => $config['patient']['dob'] ?? null,
+            'patient_sex' => $config['patient']['sex'] ?? null,
+            'study_description' => $config['study']['description'] ?? null,
+            'study_uid' => $config['study']['uid'] ?? null,
+            'series_uid' => null, // No fallback - should come from actual DICOM data
+            'modality' => $config['study']['modality'] ?? null,
+            'body_part' => $config['study']['body_part'] ?? null,
         ];
     }
 
@@ -132,7 +129,7 @@ class DicomProcessor
         $existing['study_uid'] = $existing['study_uid'] ?? ($new['study_uid'] ?? null);
 
         // Collect unique modalities
-        if (isset($new['modality']) && !in_array($new['modality'], $existing['modalities'])) {
+        if (isset($new['modality']) && !in_array($new['modality'], $existing['modalities'], true)) {
             $existing['modalities'][] = $new['modality'];
         }
 
@@ -153,8 +150,8 @@ class DicomProcessor
             if (!$seriesExists) {
                 $existing['series'][] = [
                     'series_uid' => $new['series_uid'],
-                    'modality' => $new['modality'] ?? 'CT',
-                    'body_part' => $new['body_part'] ?? 'Unknown',
+                    'modality' => $new['modality'] ?? '',
+                    'body_part' => $new['body_part'] ?? '',
                     'instance_count' => 1,
                 ];
             } else {
@@ -231,7 +228,16 @@ class DicomProcessor
      */
     private function isDcmdumpAvailable(): bool
     {
-        return !empty(shell_exec('which dcmdump 2>/dev/null'));
+        // Cross-platform dcmdump detection
+        if (PHP_OS_FAMILY === 'Windows') {
+            // Windows: use 'where' command
+            $output = shell_exec('where dcmdump 2>nul');
+        } else {
+            // Unix-like systems (Linux, macOS, etc.): use 'which' command
+            $output = shell_exec('which dcmdump 2>/dev/null');
+        }
+        
+        return !empty($output) && trim($output) !== '';
     }
 
     /**

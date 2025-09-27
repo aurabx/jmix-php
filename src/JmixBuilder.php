@@ -1,4 +1,4 @@
-<?php
+<?php /** @noinspection PhpConditionCheckedByNextConditionInspection */
 
 declare(strict_types=1);
 
@@ -47,7 +47,7 @@ class JmixBuilder
         $timestamp = date('Y-m-d\TH:i:s\Z');
 
         // Process DICOM files to extract metadata
-        $dicomMetadata = $this->dicomProcessor->processDicomFolder($dicomPath);
+        $dicomMetadata = $this->dicomProcessor->processDicomFolder($dicomPath, $config);
 
         // Build the three main components
         $manifest = $this->buildManifest($transmissionId, $timestamp, $config, $dicomMetadata);
@@ -98,18 +98,7 @@ class JmixBuilder
                 'file' => $config['report']['file'] ?? '',
             ],
             'studies' => $this->buildStudies($dicomMetadata),
-            'extensions' => [
-                'custom_tags' => $config['custom_tags'] ?? [],
-                'deid' => [
-                    'keys' => $config['deid_keys'] ?? ['PatientName', 'PatientID', 'IssuerOfPatientID'],
-                ],
-                'consent' => $config['consent'] ?? [
-                    'status' => 'granted',
-                    'scope' => ['treatment'],
-                    'method' => 'digital-signature',
-                    'signed_on' => date('Y-m-d'),
-                ],
-            ],
+            'extensions' => $this->buildMetadataExtensions($config),
         ];
     }
 
@@ -150,16 +139,18 @@ class JmixBuilder
      */
     private function buildSecurity(array $securityConfig): array
     {
-        return [
+        $security = [
             'classification' => $securityConfig['classification'] ?? 'confidential',
             'payload_hash' => '', // Will be calculated after payload is written
-            'signature' => [
-                'alg' => 'RS256',
-                'sig' => 'MEUCIBnA123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-                'hash' => 'sha256:4f06faee1ab2c3d4e5f6789abc0def123456789abcdef012345678900abcdef12',
-            ],
-            // Encryption block will be added later if encryption is enabled
         ];
+
+        // Only include signature if provided in config
+        if (isset($securityConfig['signature'])) {
+            $security['signature'] = $securityConfig['signature'];
+        }
+
+        // Encryption block will be added later if encryption is enabled
+        return $security;
     }
 
     /**
@@ -180,63 +171,102 @@ class JmixBuilder
         } elseif ($dicomName) {
             // Parse DICOM format: Family^Given^Middle^Prefix^Suffix
             $nameParts = explode('^', $dicomName);
-            $family = $nameParts[0] ?? 'Unknown';
+            $family = $nameParts[0] ?? '';
             $given = isset($nameParts[1]) ? [$nameParts[1]] : [];
             $nameString = $family . ($given ? ', ' . implode(' ', $given) : '');
         } else {
-            $family = 'Unknown';
+            $family = '';
             $given = [];
-            $nameString = 'Unknown';
+            $nameString = '';
         }
 
-        return [
+        $patient = [
             'id' => $patientConfig['id'] ?? $dicomMetadata['patient_id'] ?? 'urn:uuid:' . Uuid::uuid4()->toString(),
             'name' => [
                 'family' => $family,
                 'given' => $given,
                 'text' => $nameString,
             ],
-            'dob' => $patientConfig['dob'] ?? $dicomMetadata['patient_dob'] ?? '1900-01-01',
-            'sex' => $patientConfig['sex'] ?? $dicomMetadata['patient_sex'] ?? 'O',
-            'identifiers' => $patientConfig['identifiers'] ?? [
-                [
-                    'system' => 'http://ns.electronichealth.net.au/id/ihi/1.0',
-                    'value' => $patientConfig['ihi'] ?? '8003608166690503',
-                ],
-            ],
-            'verification' => [
-                'verified_by' => 'myhealthid.au',
-                'verified_on' => date('Y-m-d'),
-            ],
+            'dob' => $patientConfig['dob'] ?? $dicomMetadata['patient_dob'] ?? null,
+            'sex' => $patientConfig['sex'] ?? $dicomMetadata['patient_sex'] ?? null,
         ];
+
+        // Only add identifiers if provided in config
+        if (isset($patientConfig['identifiers'])) {
+            $patient['identifiers'] = $patientConfig['identifiers'];
+        }
+
+        // Only add verification if provided in config
+        if (isset($patientConfig['verification'])) {
+            $patient['verification'] = $patientConfig['verification'];
+        }
+
+        return $patient;
+    }
+
+    /**
+     * Build metadata extensions from config
+     */
+    private function buildMetadataExtensions(array $config): object
+    {
+        $extensions = new \stdClass();
+
+        // Add custom tags if provided
+        if (isset($config['custom_tags']) && !empty($config['custom_tags'])) {
+            $extensions->custom_tags = $config['custom_tags'];
+        }
+
+        // Add de-identification keys if provided
+        if (isset($config['deid_keys']) && !empty($config['deid_keys'])) {
+            $extensions->deid = (object) [
+                'keys' => $config['deid_keys'],
+            ];
+        }
+
+        // Add consent information if provided
+        if (isset($config['consent'])) {
+            $extensions->consent = (object) $config['consent'];
+        }
+
+        return $extensions;
     }
 
     /**
      * Build studies information from DICOM metadata
      */
-    private function buildStudies(array $dicomMetadata): array
+    private function buildStudies(array $dicomMetadata): object
     {
-        return [
-            'study_description' => $dicomMetadata['study_description'] ?? 'Medical Imaging Study',
-            'study_uid' => $dicomMetadata['study_uid'] ?? '1.2.840.113619.2.312.4120.7934893.' . date('YmdHi'),
-            'series' => $dicomMetadata['series'] ?? [
-                [
-                    'series_uid' => '1.2.3.4.5.6.789',
-                    'modality' => 'CT',
-                    'body_part' => 'Chest',
-                    'instance_count' => $dicomMetadata['instance_count'] ?? 1,
-                ],
-            ],
-        ];
+        $studies = new \stdClass();
+
+        // Only add study description if available
+        if (!empty($dicomMetadata['study_description'])) {
+            $studies->study_description = $dicomMetadata['study_description'];
+        }
+
+        // Only add study UID if available
+        if (!empty($dicomMetadata['study_uid'])) {
+            $studies->study_uid = $dicomMetadata['study_uid'];
+        }
+
+        // Only add series if available and not empty
+        if (!empty($dicomMetadata['series'])) {
+            $studies->series = $dicomMetadata['series'];
+        }
+
+        // Note: instance_count should be at series level, not studies level
+        // The total instance count is calculated by summing series instance_count values
+
+        return $studies;
     }
 
     /**
      * Save JMIX envelope to the correct directory structure
      *
-     * @param  array      $envelope   The envelope data
-     * @param  string     $outputPath Base output directory
-     * @param  array|null $config     Optional configuration for file handling
+     * @param  array  $envelope  The envelope data
+     * @param  string  $outputPath  Base output directory
+     * @param  array|null  $config  Optional configuration for file handling
      * @return string The path to the created envelope directory
+     * @throws JmixException
      */
     public function saveToFiles(array $envelope, string $outputPath, ?array $config = null): string
     {
@@ -246,7 +276,7 @@ class JmixBuilder
         // Create the envelope writer
         $writer = new EnvelopeWriter($outputPath, $envelopeId);
 
-        // Write initial JSON files (without manifest yet - we need to calculate payload hash first)
+        // Write initial JSON files (without a manifest yet - we need to calculate payload hash first)
         $writer->writeJson('audit.json', $envelope['audit']);
         $writer->writeJson('payload/metadata.json', $envelope['metadata']);
 
@@ -265,21 +295,21 @@ class JmixBuilder
             $this->handleAttachments($writer, $config);
         }
 
-        // Encrypt payload if recipient public key is provided
-        $encryptionParams = null;
-        if ($config && isset($config['encryption']['recipient_public_key'])) {
-            $encryptionParams = $writer->encryptPayloadDirectory($config['encryption']['recipient_public_key']);
-        }
-
-        // Generate files.json if payload/files/ has content
+        // Generate files.json if payload/files/ has content (BEFORE encryption)
         if ($writer->hasFiles()) {
             $filesManifest = $writer->generateFilesManifest();
             if (!empty($filesManifest)) {
-                // Files schema validation is optional - we'll skip it for now
-                // TODO: Add files.json schema validation if needed
+                // Validate files manifest against schema
+                $this->validator->validateFiles($filesManifest);
 
                 $writer->writeJson('payload/files.json', $filesManifest);
             }
+        }
+
+        // Encrypt payload if a recipient public key is provided
+        $encryptionParams = null;
+        if ($config && isset($config['encryption']['recipient_public_key'])) {
+            $encryptionParams = $writer->encryptPayloadDirectory($config['encryption']['recipient_public_key']);
         }
 
         // Calculate payload hash after all payload content is written
@@ -305,6 +335,7 @@ class JmixBuilder
 
     /**
      * Handle copying attachments like reports and other files
+     * @throws JmixException
      */
     private function handleAttachments(EnvelopeWriter $writer, array $config): void
     {
@@ -322,7 +353,7 @@ class JmixBuilder
                     $basename = basename($file);
                     $writer->copyFile($file, 'payload/files/' . $basename);
                 } elseif (is_array($file) && isset($file['path']) && file_exists($file['path'])) {
-                    $basename = isset($file['name']) ? $file['name'] : basename($file['path']);
+                    $basename = $file['name'] ?? basename($file['path']);
                     $writer->copyFile($file['path'], 'payload/files/' . $basename);
                 }
             }

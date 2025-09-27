@@ -33,7 +33,7 @@ class PayloadEncryptor
             throw new JmixException("Payload directory does not exist: {$payloadPath}");
         }
 
-        // Generate ephemeral keypair for this envelope (forward secrecy)
+        // Generate an ephemeral keypair for this envelope (forward secrecy)
         $ephemeralKeyPair = sodium_crypto_box_keypair();
         $ephemeralPrivateKey = sodium_crypto_box_secretkey($ephemeralKeyPair);
         $ephemeralPublicKey = sodium_crypto_box_publickey($ephemeralKeyPair);

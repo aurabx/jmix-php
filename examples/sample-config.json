@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "sender": {
+    "name": "General Hospital",
+    "id": "org:au.gov.health.456789",
+    "contact": "radiology@generalhospital.org.au"
+  },
+  "requester": {
+    "name": "Dr Garcia George",
+    "id": "org:au.gov.health.garcia001",
+    "contact": "garcia.george@generalhospital.org.au"
+  },
+  "receivers": [
+    {
+      "name": "Specialist Radiology Clinic",
+      "id": "org:au.gov.health.specialist001",
+      "contact": {
+        "system": "email",
+        "value": "referrals@specialistradiology.org.au"
+      }
+    }
+  ],
+  "patient": {
+    "name": "Jane Brown",
+    "dob": "1969-03-12",
+    "sex": "M",
+    "ihi": "8003608166690503",
+    "identifiers": [
+      {
+        "system": "http://ns.electronichealth.net.au/id/ihi/1.0",
+        "value": "8003608166690503"
+      },
+      {
+        "system": "urn:oid:1.2.36.146.595.217.0.1",
+        "value": "PID156695"
+      }
+    ]
+  },
+  "report": {
+    "file": "files/ct_pulmonary_angiogram_report.pdf",
+    "url": "https://pacs.generalhospital.org.au/reports/ACC6736409"
+  },
+  "files": [
+    {
+      "file": "files/ct_pulmonary_angiogram_report.pdf",
+      "url": "https://pacs.generalhospital.org.au/reports/ACC6736409"
+    }
+  ],
+  "custom_tags": [
+    "ct-angiogram",
+    "pulmonary",
+    "chest-imaging",
+    "low-dose"
+  ],
+  "security": {
+    "classification": "confidential"
+  }
+}

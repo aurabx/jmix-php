@@ -35,13 +35,13 @@ class JmixBuilderTest extends TestCase
         file_put_contents($dummyDicomFile, $dummyData);
 
         $config = $this->getValidConfig();
-        
+
         $envelope = $this->builder->buildFromDicom($dicomPath, $config);
 
         $this->assertIsArray($envelope);
         $this->assertArrayHasKey('manifest', $envelope);
         $this->assertArrayHasKey('metadata', $envelope);
-        $this->assertArrayHasKey('transmission', $envelope);
+        $this->assertArrayHasKey('audit', $envelope);
 
         // Check manifest structure
         $manifest = $envelope['manifest'];
@@ -58,6 +58,12 @@ class JmixBuilderTest extends TestCase
         $this->assertEquals(['Jane'], $metadata['patient']['name']['given']);
         $this->assertEquals('1975-02-14', $metadata['patient']['dob']);
         $this->assertIsArray($metadata['studies']['series']);
+
+        // Check audit structure (renamed from transmission)
+        $audit = $envelope['audit'];
+        $this->assertIsArray($audit['audit']);
+        $this->assertNotEmpty($audit['audit']);
+        $this->assertEquals('created', $audit['audit'][0]['event']);
     }
 
     public function testBuildFromDicomWithNonExistentPath(): void
@@ -94,16 +100,88 @@ class JmixBuilderTest extends TestCase
         $envelope = $this->builder->buildFromDicom($dicomPath, $config);
 
         $outputPath = $this->tempDir . '/output';
-        $this->builder->saveToFiles($envelope, $outputPath);
+        $envelopePath = $this->builder->saveToFiles($envelope, $outputPath, $config);
 
-        $this->assertFileExists($outputPath . '/manifest.json');
-        $this->assertFileExists($outputPath . '/metadata.json');
-        $this->assertFileExists($outputPath . '/transmission.json');
+        // Check envelope directory structure
+        $this->assertDirectoryExists($envelopePath);
+        $this->assertFileExists($envelopePath . '/manifest.json');
+        $this->assertFileExists($envelopePath . '/audit.json');
+        $this->assertDirectoryExists($envelopePath . '/payload');
+        $this->assertFileExists($envelopePath . '/payload/metadata.json');
+        $this->assertDirectoryExists($envelopePath . '/payload/dicom');
+
+        // Check that DICOM files were copied
+        $this->assertFileExists($envelopePath . '/payload/dicom/test.dcm');
 
         // Verify JSON structure
-        $manifestJson = json_decode(file_get_contents($outputPath . '/manifest.json'), true);
+        $manifestJson = json_decode(file_get_contents($envelopePath . '/manifest.json'), true);
         $this->assertIsArray($manifestJson);
         $this->assertEquals('Radiology Clinic A', $manifestJson['sender']['name']);
+
+        // Verify audit.json (renamed from transmission.json)
+        $auditJson = json_decode(file_get_contents($envelopePath . '/audit.json'), true);
+        $this->assertIsArray($auditJson);
+        $this->assertArrayHasKey('audit', $auditJson);
+
+        // Verify metadata.json is in payload/
+        $metadataJson = json_decode(file_get_contents($envelopePath . '/payload/metadata.json'), true);
+        $this->assertIsArray($metadataJson);
+        $this->assertEquals('Jane Doe', $metadataJson['patient']['name']['text']);
+
+        // Verify payload hash is calculated and included in manifest
+        $this->assertArrayHasKey('payload_hash', $manifestJson['security']);
+        $this->assertStringStartsWith('sha256:', $manifestJson['security']['payload_hash']);
+        $this->assertNotEmpty($manifestJson['security']['payload_hash']);
+        $this->assertNotEquals('sha256:', $manifestJson['security']['payload_hash']); // Ensure it's not just the prefix
+    }
+
+    public function testSaveToFilesWithEncryption(): void
+    {
+        // Check if sodium extension is available
+        if (!extension_loaded('sodium')) {
+            $this->markTestSkipped('Sodium extension is not available');
+        }
+
+        // Create a dummy DICOM file
+        $dicomPath = $this->tempDir . '/dicom';
+        mkdir($dicomPath, 0755, true);
+        $dummyDicomFile = $dicomPath . '/test.dcm';
+        $dummyData = str_repeat("\x00", 128) . 'DICM' . str_repeat("\x00", 100);
+        file_put_contents($dummyDicomFile, $dummyData);
+
+        // Generate test keypair
+        $keypair = \AuraBox\Jmix\Encryption\PayloadEncryptor::generateKeypair();
+
+        $config = $this->getValidConfig();
+        $config['encryption'] = [
+            'recipient_public_key' => $keypair['public_key'],
+        ];
+
+        $envelope = $this->builder->buildFromDicom($dicomPath, $config);
+
+        $outputPath = $this->tempDir . '/output';
+        $envelopePath = $this->builder->saveToFiles($envelope, $outputPath, $config);
+
+        // Check envelope directory structure
+        $this->assertDirectoryExists($envelopePath);
+        $this->assertFileExists($envelopePath . '/manifest.json');
+        $this->assertFileExists($envelopePath . '/audit.json');
+
+        // With encryption, payload should be a single encrypted file, not a directory
+        $this->assertFileExists($envelopePath . '/payload.encrypted');
+        $this->assertDirectoryDoesNotExist($envelopePath . '/payload');
+
+        // Verify manifest contains encryption parameters
+        $manifestJson = json_decode(file_get_contents($envelopePath . '/manifest.json'), true);
+        $this->assertArrayHasKey('encryption', $manifestJson['security']);
+        $this->assertEquals('AES-256-GCM', $manifestJson['security']['encryption']['algorithm']);
+        $this->assertArrayHasKey('ephemeral_public_key', $manifestJson['security']['encryption']);
+        $this->assertArrayHasKey('iv', $manifestJson['security']['encryption']);
+        $this->assertArrayHasKey('auth_tag', $manifestJson['security']['encryption']);
+
+        // Verify payload hash is calculated for encrypted file
+        $this->assertArrayHasKey('payload_hash', $manifestJson['security']);
+        $this->assertStringStartsWith('sha256:', $manifestJson['security']['payload_hash']);
     }
 
     private function getValidConfig(): array

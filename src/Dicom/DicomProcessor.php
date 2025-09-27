@@ -19,7 +19,7 @@ class DicomProcessor
     public function processDicomFolder(string $dicomPath): array
     {
         $dicomFiles = $this->findDicomFiles($dicomPath);
-        
+
         if (empty($dicomFiles)) {
             throw new JmixException("No DICOM files found in: {$dicomPath}");
         }
@@ -42,7 +42,7 @@ class DicomProcessor
         }
 
         $metadata['instance_count'] = count($dicomFiles);
-        
+
         return $metadata;
     }
 
@@ -59,7 +59,7 @@ class DicomProcessor
         foreach ($iterator as $file) {
             if ($file->isFile()) {
                 $filename = $file->getFilename();
-                
+
                 // Check if it might be a DICOM file
                 if ($this->isDicomFile($file->getPathname())) {
                     $files[] = $file->getPathname();
@@ -101,10 +101,10 @@ class DicomProcessor
                 return $dcmData;
             }
         }
-        
+
         // Fallback to placeholder data
         $filename = basename($filePath);
-        
+
         return [
             'patient_name' => 'Jane Doe',
             'patient_id' => 'PAT123456',
@@ -140,7 +140,7 @@ class DicomProcessor
         if (isset($new['series_uid'])) {
             $seriesExists = false;
             $seriesIndex = -1;
-            
+
             // Check if series already exists
             foreach ($existing['series'] as $index => $series) {
                 if ($series['series_uid'] === $new['series_uid']) {
@@ -149,7 +149,7 @@ class DicomProcessor
                     break;
                 }
             }
-            
+
             if (!$seriesExists) {
                 $existing['series'][] = [
                     'series_uid' => $new['series_uid'],
@@ -184,7 +184,7 @@ class DicomProcessor
         }
 
         $output = shell_exec("dcmdump +P 0008,0060 +P 0010,0010 +P 0010,0020 +P 0010,0030 +P 0010,0040 +P 0008,1030 +P 0020,000D +P 0020,000E +P 0018,0015 " . escapeshellarg($filePath));
-        
+
         if (!$output) {
             return [];
         }
@@ -192,7 +192,7 @@ class DicomProcessor
         // Parse dcmdump output
         $metadata = [];
         $lines = explode("\n", $output);
-        
+
         foreach ($lines as $line) {
             if (preg_match('/\(0010,0010\).*?\[(.*?)\]/', $line, $matches)) {
                 $metadata['patient_name'] = trim($matches[1]);

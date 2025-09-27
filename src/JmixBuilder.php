@@ -6,6 +6,7 @@ namespace AuraBox\Jmix;
 
 use AuraBox\Jmix\Dicom\DicomProcessor;
 use AuraBox\Jmix\Exceptions\JmixException;
+use AuraBox\Jmix\Filesystem\EnvelopeWriter;
 use AuraBox\Jmix\Validation\SchemaValidator;
 use Ramsey\Uuid\Uuid;
 
@@ -16,6 +17,7 @@ class JmixBuilder
 {
     private DicomProcessor $dicomProcessor;
     private SchemaValidator $validator;
+    private string $lastDicomPath = '';
 
     public function __construct(?string $schemaPath = null)
     {
@@ -26,9 +28,9 @@ class JmixBuilder
     /**
      * Build a complete JMIX envelope from a DICOM folder and configuration
      *
-     * @param  string  $dicomPath  Path to folder containing DICOM files
-     * @param  array  $config  Configuration array with sender, receiver, etc.
-     * @return array Complete JMIX envelope with manifest, metadata, and transmission
+     * @param  string $dicomPath Path to folder containing DICOM files
+     * @param  array  $config    Configuration array with sender, receiver, etc.
+     * @return array Complete JMIX envelope with manifest, metadata, and audit
      * @throws JmixException
      */
     public function buildFromDicom(string $dicomPath, array $config): array
@@ -36,6 +38,9 @@ class JmixBuilder
         if (!is_dir($dicomPath)) {
             throw new JmixException("DICOM path does not exist or is not a directory: {$dicomPath}");
         }
+
+        // Store the DICOM path for later use in saveToFiles
+        $this->lastDicomPath = $dicomPath;
 
         // Generate unique ID and timestamp for this transmission
         $transmissionId = Uuid::uuid4()->toString();
@@ -47,17 +52,16 @@ class JmixBuilder
         // Build the three main components
         $manifest = $this->buildManifest($transmissionId, $timestamp, $config, $dicomMetadata);
         $metadata = $this->buildMetadata($transmissionId, $timestamp, $config, $dicomMetadata);
-        $transmission = $this->buildTransmission($transmissionId, $timestamp, $config);
+        $audit = $this->buildAudit($transmissionId, $timestamp, $config);
 
-        // Validate against schemas
-        $this->validator->validateManifest($manifest);
+        // Validate metadata and audit schemas now (manifest will be validated after payload hash is calculated)
         $this->validator->validateMetadata($metadata);
-        $this->validator->validateTransmission($transmission);
+        $this->validator->validateAudit($audit);
 
         return [
             'manifest' => $manifest,
             'metadata' => $metadata,
-            'transmission' => $transmission,
+            'audit' => $audit,
         ];
     }
 
@@ -91,7 +95,7 @@ class JmixBuilder
             'timestamp' => $timestamp,
             'patient' => $this->buildPatient($config['patient'], $dicomMetadata),
             'report' => [
-                'file' => $config['report']['file'] ?? 'report.pdf',
+                'file' => $config['report']['file'] ?? '',
             ],
             'studies' => $this->buildStudies($dicomMetadata),
             'extensions' => [
@@ -110,9 +114,9 @@ class JmixBuilder
     }
 
     /**
-     * Build transmission audit trail
+     * Build audit trail
      */
-    private function buildTransmission(string $id, string $timestamp, array $config): array
+    private function buildAudit(string $id, string $timestamp, array $config): array
     {
         return [
             'audit' => [
@@ -148,18 +152,13 @@ class JmixBuilder
     {
         return [
             'classification' => $securityConfig['classification'] ?? 'confidential',
-            'payload_hash' => 'sha256:4f06faee1ab2c3d4e5f6789abc0def123456789abcdef012345678900abcdef12',
+            'payload_hash' => '', // Will be calculated after payload is written
             'signature' => [
                 'alg' => 'RS256',
                 'sig' => 'MEUCIBnA123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
                 'hash' => 'sha256:4f06faee1ab2c3d4e5f6789abc0def123456789abcdef012345678900abcdef12',
             ],
-            'encryption' => [
-                'algorithm' => 'AES-256-GCM',
-                'ephemeral_public_key' => '<base64>',
-                'iv' => '<base64>',
-                'auth_tag' => '<base64>',
-            ],
+            // Encryption block will be added later if encryption is enabled
         ];
     }
 
@@ -171,7 +170,7 @@ class JmixBuilder
         // Parse name from config or DICOM
         $configName = $patientConfig['name'] ?? null;
         $dicomName = $dicomMetadata['patient_name'] ?? null;
-        
+
         if ($configName) {
             // Use config name as-is (not DICOM format)
             $nameString = $configName;
@@ -189,7 +188,7 @@ class JmixBuilder
             $given = [];
             $nameString = 'Unknown';
         }
-        
+
         return [
             'id' => $patientConfig['id'] ?? $dicomMetadata['patient_id'] ?? 'urn:uuid:' . Uuid::uuid4()->toString(),
             'name' => [
@@ -232,27 +231,101 @@ class JmixBuilder
     }
 
     /**
-     * Save JMIX envelope to files
+     * Save JMIX envelope to the correct directory structure
+     *
+     * @param  array      $envelope   The envelope data
+     * @param  string     $outputPath Base output directory
+     * @param  array|null $config     Optional configuration for file handling
+     * @return string The path to the created envelope directory
      */
-    public function saveToFiles(array $envelope, string $outputPath): void
+    public function saveToFiles(array $envelope, string $outputPath, ?array $config = null): string
     {
-        if (!is_dir($outputPath)) {
-            mkdir($outputPath, 0755, true);
+        // Get the envelope ID from the manifest
+        $envelopeId = $envelope['manifest']['id'];
+
+        // Create the envelope writer
+        $writer = new EnvelopeWriter($outputPath, $envelopeId);
+
+        // Write initial JSON files (without manifest yet - we need to calculate payload hash first)
+        $writer->writeJson('audit.json', $envelope['audit']);
+        $writer->writeJson('payload/metadata.json', $envelope['metadata']);
+
+        // Write optional manifest.jws if present
+        if (isset($envelope['manifest_jws'])) {
+            $writer->writeJson('manifest.jws', $envelope['manifest_jws']);
         }
 
-        file_put_contents(
-            $outputPath . '/manifest.json',
-            json_encode($envelope['manifest'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-        );
+        // Copy DICOM files to payload/dicom/
+        if (!empty($this->lastDicomPath) && is_dir($this->lastDicomPath)) {
+            $writer->copyDicomTree($this->lastDicomPath);
+        }
 
-        file_put_contents(
-            $outputPath . '/metadata.json',
-            json_encode($envelope['metadata'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-        );
+        // Handle report files and other attachments
+        if ($config) {
+            $this->handleAttachments($writer, $config);
+        }
 
-        file_put_contents(
-            $outputPath . '/transmission.json',
-            json_encode($envelope['transmission'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)
-        );
+        // Encrypt payload if recipient public key is provided
+        $encryptionParams = null;
+        if ($config && isset($config['encryption']['recipient_public_key'])) {
+            $encryptionParams = $writer->encryptPayloadDirectory($config['encryption']['recipient_public_key']);
+        }
+
+        // Generate files.json if payload/files/ has content
+        if ($writer->hasFiles()) {
+            $filesManifest = $writer->generateFilesManifest();
+            if (!empty($filesManifest)) {
+                // Files schema validation is optional - we'll skip it for now
+                // TODO: Add files.json schema validation if needed
+
+                $writer->writeJson('payload/files.json', $filesManifest);
+            }
+        }
+
+        // Calculate payload hash after all payload content is written
+        $payloadHash = $writer->calculatePayloadHash();
+
+        // Update the manifest with the payload hash and encryption parameters
+        $manifest = $envelope['manifest'];
+        $manifest['security']['payload_hash'] = $payloadHash;
+
+        // Add encryption parameters if payload was encrypted
+        if ($encryptionParams) {
+            $manifest['security']['encryption'] = $encryptionParams;
+        }
+
+        // Validate the completed manifest with payload hash
+        $this->validator->validateManifest($manifest);
+
+        // Now write the final manifest with the payload hash
+        $writer->writeJson('manifest.json', $manifest);
+
+        return $writer->getEnvelopeRoot();
+    }
+
+    /**
+     * Handle copying attachments like reports and other files
+     */
+    private function handleAttachments(EnvelopeWriter $writer, array $config): void
+    {
+        // Handle report file if specified
+        if (isset($config['report']['file']) && file_exists($config['report']['file'])) {
+            $reportFile = $config['report']['file'];
+            $basename = basename($reportFile);
+            $writer->copyFile($reportFile, 'payload/files/' . $basename);
+        }
+
+        // Handle additional files if specified in config
+        if (isset($config['files']) && is_array($config['files'])) {
+            foreach ($config['files'] as $file) {
+                if (is_string($file) && file_exists($file)) {
+                    $basename = basename($file);
+                    $writer->copyFile($file, 'payload/files/' . $basename);
+                } elseif (is_array($file) && isset($file['path']) && file_exists($file['path'])) {
+                    $basename = isset($file['name']) ? $file['name'] : basename($file['path']);
+                    $writer->copyFile($file['path'], 'payload/files/' . $basename);
+                }
+            }
+        }
     }
 }

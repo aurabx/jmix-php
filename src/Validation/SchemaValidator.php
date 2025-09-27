@@ -37,9 +37,9 @@ class SchemaValidator
     }
 
     /**
-     * Validate transmission against its schema
+     * Validate audit against its schema
      */
-    public function validateTransmission(array $data): void
+    public function validateAudit(array $data): void
     {
         $this->validate($data, 'audit.schema.json');
     }
@@ -50,7 +50,7 @@ class SchemaValidator
     private function validate(array $data, string $schemaFile): void
     {
         $schemaPath = $this->schemaPath . '/' . $schemaFile;
-        
+
         if (!file_exists($schemaPath)) {
             throw new ValidationException("Schema file not found: {$schemaPath}");
         }
@@ -62,7 +62,7 @@ class SchemaValidator
 
         $validator = new Validator();
         $dataObj = json_decode(json_encode($data)); // Convert array to object
-        
+
         $validator->validate($dataObj, $schema, Constraint::CHECK_MODE_COERCE_TYPES);
 
         if (!$validator->isValid()) {
@@ -70,7 +70,7 @@ class SchemaValidator
             foreach ($validator->getErrors() as $error) {
                 $errors[] = sprintf('[%s] %s', $error['property'], $error['message']);
             }
-            
+
             throw new ValidationException(
                 'Schema validation failed for ' . $schemaFile,
                 $errors

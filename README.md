@@ -1,15 +1,19 @@
 # JMIX PHP Library
 
-A PHP library for creating JMIX (JSON Medical Interchange) envelopes from DICOM files. JMIX is a secure data format for exchanging medical/healthcare information with strong cryptographic features.
+A PHP library for creating and processing JMIX (JSON Medical Interchange) envelopes from DICOM files. JMIX is a secure data format for exchanging medical/healthcare information with strong cryptographic features including AES-256-GCM encryption.
 
 ## Features
 
-- Convert DICOM folders to complete JMIX envelopes
-- Automatic metadata extraction from DICOM files
-- JSON Schema validation for all components
-- Simple, array-based configuration
-- Cryptographic assertion support (placeholders for real implementations)
-- Built-in audit trail generation
+- **Convert DICOM folders to complete JMIX envelopes**
+- **Automatic metadata extraction from DICOM files**
+- **JSON Schema validation for all components**
+- **Simple, array-based configuration**
+- **AES-256-GCM payload encryption** with ECDH key exchange (Curve25519)
+- **Payload decryption and envelope extraction**
+- **SHA-256 payload hash verification** for data integrity
+- **Built-in audit trail generation**
+- **CLI tools** for building, analyzing, and decrypting envelopes
+- **Ephemeral keys** for forward secrecy
 
 ## Installation
 
@@ -54,8 +58,24 @@ $config = [
 $jmixBuilder = new JmixBuilder();
 $envelope = $jmixBuilder->buildFromDicom('/path/to/dicom/files', $config);
 
-// Save to files
-$jmixBuilder->saveToFiles($envelope, '/path/to/output');
+// Save to JMIX envelope directory
+$envelopePath = $jmixBuilder->saveToFiles($envelope, '/path/to/output', $config);
+echo "Envelope created at: {$envelopePath}\n";
+
+// Example with encryption (optional)
+// Generate keypair for encryption
+use AuraBox\Jmix\Encryption\PayloadEncryptor;
+$keypair = PayloadEncryptor::generateKeypair();
+
+// Add encryption to config
+$config['encryption'] = [
+    'recipient_public_key' => $keypair['public_key']
+];
+
+// Build encrypted envelope
+$encryptedEnvelope = $jmixBuilder->buildFromDicom('/path/to/dicom/files', $config);
+$encryptedPath = $jmixBuilder->saveToFiles($encryptedEnvelope, '/path/to/output', $config);
+echo "🔒 Encrypted envelope created at: {$encryptedPath}\n";
 ```
 
 ## JMIX Components
@@ -77,11 +97,176 @@ Contains medical/clinical data:
 - De-identification tracking
 - File/report references
 
-### 3. Transmission (`transmission.json`)
+### 3. Audit (`audit.json`)
 Contains audit trail:
 - Event logging with timestamps
 - Chain of custody tracking
 - Cryptographic signatures for events
+
+## Encryption and Decryption
+
+The library supports enterprise-grade AES-256-GCM encryption with ECDH key exchange for secure medical data transmission.
+
+### Generating Keys
+
+```php
+use AuraBox\Jmix\Encryption\PayloadEncryptor;
+
+// Generate a keypair for testing/development
+$keypair = PayloadEncryptor::generateKeypair();
+$publicKey = $keypair['public_key'];   // For encryption (share with sender)
+$privateKey = $keypair['private_key']; // For decryption (keep secure!)
+
+echo "Public Key: " . $publicKey . "\n";
+echo "Private Key: " . $privateKey . "\n";
+```
+
+### Creating Encrypted Envelopes
+
+```php
+use AuraBox\Jmix\JmixBuilder;
+use AuraBox\Jmix\Encryption\PayloadEncryptor;
+
+// Your regular configuration
+$config = [
+    'sender' => ['name' => 'Clinic A', 'id' => 'org:clinic.a', 'contact' => 'info@clinica.com'],
+    'requester' => ['name' => 'Dr Smith', 'id' => 'doc:smith', 'contact' => 'smith@clinic.com'],
+    'receivers' => [['name' => 'Clinic B', 'id' => 'org:clinic.b', 'contact' => 'info@clinicb.com']],
+    'patient' => ['name' => 'Jane Doe', 'dob' => '1975-02-14', 'sex' => 'F'],
+    // ... other config
+];
+
+// Add encryption
+$config['encryption'] = [
+    'recipient_public_key' => $recipientPublicKey  // Recipient's public key
+];
+
+// Build encrypted envelope
+$jmixBuilder = new JmixBuilder();
+$envelope = $jmixBuilder->buildFromDicom('/path/to/dicom', $config);
+$envelopePath = $jmixBuilder->saveToFiles($envelope, '/path/to/output', $config);
+
+echo "🔒 Encrypted envelope created at: {$envelopePath}\n";
+```
+
+### Analyzing and Decrypting Envelopes
+
+```php
+use AuraBox\Jmix\JmixDecryptor;
+
+$decryptor = new JmixDecryptor();
+
+// 1. Analyze envelope (without extracting)
+$analysis = $decryptor->analyzeEnvelope('/path/to/envelope.JMIX');
+echo "Envelope ID: " . $analysis['envelope_id'] . "\n";
+echo "Encrypted: " . ($analysis['is_encrypted'] ? 'Yes' : 'No') . "\n";
+echo "Patient: " . $analysis['sender']['name'] . "\n";
+
+if ($analysis['is_encrypted']) {
+    echo "Encryption: " . $analysis['encryption']['algorithm'] . "\n";
+}
+
+// 2. Decrypt encrypted envelope
+if ($analysis['is_encrypted']) {
+    $envelope = $decryptor->decryptEnvelope(
+        '/path/to/encrypted.JMIX',
+        $privateKey,           // Your private key
+        '/path/to/output'
+    );
+    
+    echo "🔓 Decrypted envelope contents:\n";
+    echo "Patient: " . $envelope['metadata']['patient']['name']['text'] . "\n";
+    echo "DICOM files: " . $envelope['payload_path'] . '/dicom/' . "\n";
+}
+
+// 3. Extract unencrypted envelope
+else {
+    $envelope = $decryptor->extractEnvelope(
+        '/path/to/unencrypted.JMIX',
+        '/path/to/output'
+    );
+    
+    echo "Extracted envelope contents:\n";
+    echo "Patient: " . $envelope['metadata']['patient']['name']['text'] . "\n";
+    echo "DICOM files: " . $envelope['payload_path'] . '/dicom/' . "\n";
+}
+```
+
+### CLI Tools
+
+The library includes command-line tools for building and processing envelopes:
+
+#### Building Envelopes
+
+```bash
+# Create unencrypted envelope
+jmix-build /path/to/dicom config.json /path/to/output
+
+# Create encrypted envelope (add encryption config to config.json)
+jmix-build /path/to/dicom encrypted-config.json /path/to/output
+```
+
+#### Analyzing Envelopes
+
+```bash
+# Analyze any envelope (shows encryption status, metadata, etc.)
+jmix-decrypt analyze /path/to/envelope.JMIX
+```
+
+Output:
+```
+Envelope Analysis
+ID: a1b2c3d4-5678-90ab-cdef-123456789abc
+Timestamp: 2025-09-27T06:32:05Z
+Encrypted: 🔒 Yes
+Has Payload Hash: ✓ Yes
+
+Sender:
+  Name: Test Healthcare Organization
+  ID: org:test.health.123
+
+Encryption Details:
+  Algorithm: AES-256-GCM
+  Ephemeral Public Key: Y12JovXD3Hjc/mMk...
+```
+
+#### Extracting Unencrypted Envelopes
+
+```bash
+# Extract unencrypted envelope
+jmix-decrypt extract /path/to/envelope.JMIX /path/to/output
+```
+
+#### Decrypting Encrypted Envelopes
+
+```bash
+# Decrypt encrypted envelope
+jmix-decrypt decrypt /path/to/encrypted.JMIX /path/to/output <private-key-base64>
+```
+
+Output:
+```
+✓ Envelope decrypted successfully!
+
+🔓 Decrypted Envelope Contents:
+  ID: a1b2c3d4-5678-90ab-cdef-123456789abc
+  Patient: Jane Doe
+  Study: CT Pulmonary Angiogram
+  Payload Path: /path/to/output/payload
+
+📁 Extracted Files:
+  - DICOM files in: /path/to/output/payload/dicom/
+  - Attachment files in: /path/to/output/payload/files/
+```
+
+### Security Features
+
+- **AES-256-GCM Encryption**: Authenticated encryption providing both confidentiality and integrity
+- **ECDH Key Exchange**: Uses Curve25519 elliptic curve for secure key agreement
+- **Forward Secrecy**: Ephemeral keypairs generated per envelope
+- **HKDF Key Derivation**: HKDF-SHA256 for secure key generation from shared secret
+- **Payload Hash Verification**: SHA-256 hashing ensures data integrity during decryption
+- **Memory Safety**: Sensitive data is securely cleared from memory after use
 
 ## Configuration
 
@@ -127,6 +312,11 @@ $config = [
     
     'security' => [
         'classification' => 'confidential', // or 'restricted', 'public'
+    ],
+    
+    // Encryption (optional)
+    'encryption' => [
+        'recipient_public_key' => '<base64-encoded-public-key>', // Recipient's Curve25519 public key
     ],
     
     'report' => [
@@ -175,15 +365,11 @@ The library automatically:
 4. **Merges data** from multiple DICOM files intelligently
 5. **Validates output** against JSON schemas
 
-### DICOM Integration Options
+### DICOM Parsing
 
-The library provides multiple ways to extract DICOM metadata:
+In order to extract file information to build the files list, DCMTK is required.
 
-#### Built-in Parser (Default)
-Uses PHP's file reading capabilities with placeholder data. Suitable for testing and development.
-
-#### DCMTK Integration (Optional)
-If you have [DCMTK](https://dicom.offis.de/dcmtk.php.en) installed:
+Without this, the library will not extract DICOM data.
 
 ```bash
 # Install DCMTK on macOS
@@ -197,13 +383,50 @@ The library will automatically use `dcmdump` if available.
 
 ## Output Structure
 
-After processing, you'll have three JSON files:
+After processing, you'll have a JMIX envelope directory. The structure depends on whether encryption was used:
+
+### Unencrypted Envelope
 
 ```
-output/
-├── manifest.json     # Security & routing metadata
-├── metadata.json     # Medical data & patient info  
-└── transmission.json # Audit trail
+<envelope-id>.JMIX/
+├── manifest.json              # Security & routing metadata (includes payload_hash)
+├── audit.json                 # Audit trail
+└── payload/
+    ├── metadata.json          # Medical data & patient info
+    ├── dicom/                 # DICOM files (copied from source)
+    │   ├── series_1/
+    │   │   ├── CT.1.1.dcm
+    │   │   └── ...
+    │   └── series_2/
+    │       └── ...
+    ├── files/                 # Optional: report files and attachments
+    │   └── report.pdf
+    └── files.json             # File manifest (when files/ present)
+```
+
+### Encrypted Envelope
+
+```
+<envelope-id>.JMIX/
+├── manifest.json              # Security & routing metadata + encryption parameters
+├── audit.json                 # Audit trail  
+└── payload.encrypted          # AES-256-GCM encrypted TAR archive of payload/
+```
+
+The `manifest.json` in encrypted envelopes includes encryption details:
+
+```json
+{
+  "security": {
+    "payload_hash": "sha256:abc123...",
+    "encryption": {
+      "algorithm": "AES-256-GCM",
+      "ephemeral_public_key": "Y12JovXD3Hjc...",
+      "iv": "uTv8nI6Wi/a/O7wc",
+      "auth_tag": "5c8VZzxSuWM3RMqA..."
+    }
+  }
+}
 ```
 
 Each file is validated against its respective JSON schema before being saved.
@@ -233,7 +456,9 @@ try {
 - PHP 8.1+
 - ext-json
 - ext-openssl
+- ext-sodium (for encryption/decryption)
 - Composer
+- Optional: DCMTK's `dcmdump` for enhanced DICOM metadata extraction
 
 ### Setup
 ```bash
@@ -244,7 +469,20 @@ composer install
 
 ### Testing
 ```bash
+# Run all tests
 composer test
+
+# Run specific test files
+vendor/bin/phpunit tests/JmixBuilderTest.php
+vendor/bin/phpunit tests/JmixDecryptorTest.php
+vendor/bin/phpunit tests/Encryption/PayloadEncryptorTest.php
+
+# Run tests with coverage (requires Xdebug)
+XDEBUG_MODE=coverage vendor/bin/phpunit
+
+# Test CLI tools
+bin/jmix-build ./samples/study_1 ./examples/sample-config.json ./tmp/test-output
+bin/jmix-decrypt analyze ./tmp/test-output/*.JMIX
 ```
 
 ### Code Quality
@@ -257,24 +495,38 @@ composer psalm      # Additional static analysis
 
 ## Security Considerations
 
-This library currently uses **placeholder cryptographic values** for:
-- Digital signatures  
-- Public keys
-- Encryption parameters
-- Directory attestations
+### ✅ Production-Ready Security Features
 
-For **production use**, you must:
+This library includes **enterprise-grade encryption** that is production-ready:
 
-1. **Implement real cryptographic operations** using libraries like:
-   - `paragonie/halite` for encryption
-   - `web-token/jwt-framework` for JWT/JWS signatures
-   - `paragonie/constant_time_encoding` for secure encoding
+- **AES-256-GCM encryption** with authenticated encryption
+- **ECDH key exchange** using Curve25519 elliptic curve
+- **HKDF key derivation** with SHA-256
+- **Forward secrecy** through ephemeral keypairs
+- **Payload integrity verification** with SHA-256 hashing
+- **Memory safety** with secure key clearing
 
-2. **Integrate with a certificate authority** for directory attestations
+### ⚠️ Additional Production Considerations
 
-3. **Use hardware security modules (HSMs)** for key management
+For **production use**, you should also consider:
 
-4. **Implement proper key rotation** and expiration handling
+1. **Key Management**:
+   - Use hardware security modules (HSMs) for key storage
+   - Implement proper key rotation and expiration handling
+   - Secure key distribution mechanisms
+
+2. **Digital Signatures** (currently placeholders):
+   - Integrate with `web-token/jwt-framework` for JWT/JWS signatures
+   - Use `paragonie/constant_time_encoding` for secure encoding
+
+3. **Certificate Authority Integration**:
+   - Integrate with a certificate authority for directory attestations
+   - Implement certificate validation and revocation checking
+
+4. **Compliance**:
+   - Ensure compliance with healthcare data regulations (HIPAA, GDPR, etc.)
+   - Implement audit logging for all cryptographic operations
+   - Regular security assessments and penetration testing
 
 ## Contributing
 
@@ -295,6 +547,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Email**: dev@aurabx.com
 
 ## Changelog
+
+### v2.0.0
+- **🔒 Full AES-256-GCM encryption** with ECDH key exchange (Curve25519)
+- **🔓 Decryption and envelope extraction** capabilities
+- **📋 CLI tools** for analyzing, extracting, and decrypting envelopes
+- **🔐 Payload hash verification** for data integrity
+- **📁 JMIX envelope directory structure** compliance
+- **🧪 Forward secrecy** with ephemeral keypairs
+- **🛡️ Memory safety** with secure key clearing
+- **Breaking changes**: Updated envelope structure and API
 
 ### v1.0.0
 - Initial release

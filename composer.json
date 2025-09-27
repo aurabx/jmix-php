@@ -3,7 +3,7 @@
     "description": "PHP library for JMIX (JSON Medical Interchange) format - secure medical data exchange with cryptographic features",
     "type": "library",
     "license": "MIT",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "authors": [
         {
             "name": "AuraBox Development Team",
@@ -11,9 +11,10 @@
         }
     ],
     "require": {
-        "php": "^8.1",
+        "php": "^8.2",
         "ext-json": "*",
         "ext-openssl": "*",
+        "ext-sodium": "*",
         "justinrainbow/json-schema": "^5.2",
         "ramsey/uuid": "^4.7"
     },
@@ -43,7 +44,8 @@
         "phpstan": "phpstan analyse",
         "psalm": "psalm",
         "cs-check": "phpcs",
-        "cs-fix": "phpcbf"
+        "cs-fix": "phpcbf",
+        "demo": "mkdir -p ./tmp && php bin/jmix-build samples/study_1 examples/sample-config.json ./tmp/test-envelope"
     },
     "minimum-stability": "stable",
     "prefer-stable": true

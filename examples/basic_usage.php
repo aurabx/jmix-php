@@ -91,19 +91,25 @@ try {
 
     // Save to output files
     $outputPath = __DIR__ . '/output';
-    $jmixBuilder->saveToFiles($envelope, $outputPath);
+    $envelopePath = $jmixBuilder->saveToFiles($envelope, $outputPath, $config);
 
     echo "JMIX envelope created successfully!\n";
-    echo "Files saved to: {$outputPath}\n";
+    echo "Envelope directory: {$envelopePath}\n";
+    echo "Structure:\n";
     echo "- manifest.json\n";
-    echo "- metadata.json\n";
-    echo "- transmission.json\n";
+    echo "- audit.json\n";
+    echo "- payload/\n";
+    echo "  - metadata.json\n";
+    echo "  - dicom/\n";
+    if (is_dir($envelopePath . '/payload/files')) {
+        echo "  - files/\n";
+    }
 
     // Display a summary
     echo "\nEnvelope Summary:\n";
     echo "ID: {$envelope['manifest']['id']}\n";
     echo "Timestamp: {$envelope['manifest']['timestamp']}\n";
-    echo "Patient: {$envelope['metadata']['patient']['name']}\n";
+    echo "Patient: {$envelope['metadata']['patient']['name']['text']}\n";
     echo "Study: {$envelope['metadata']['studies']['study_description']}\n";
     echo "Instance Count: {$envelope['metadata']['studies']['series'][0]['instance_count']}\n";
 

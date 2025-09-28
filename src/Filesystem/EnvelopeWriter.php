@@ -65,6 +65,25 @@ class EnvelopeWriter
     }
 
     /**
+     * Write text data to a file relative to the envelope root
+     * @throws JmixException
+     */
+    public function writeFile(string $relativePath, string $content): void
+    {
+        $fullPath = $this->envelopeRoot . '/' . ltrim($relativePath, '/');
+
+        // Ensure directory exists
+        $dir = dirname($fullPath);
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            throw new JmixException("Failed to create directory: {$dir}");
+        }
+
+        if (file_put_contents($fullPath, $content) === false) {
+            throw new JmixException("Failed to write file: {$fullPath}");
+        }
+    }
+
+    /**
      * Copy a file to the envelope with the given relative path
      * @throws JmixException
      */

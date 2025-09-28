@@ -11,6 +11,7 @@ use AuraBox\Jmix\Assertions\ReceiverAssertion;
 use AuraBox\Jmix\Dicom\DicomProcessor;
 use AuraBox\Jmix\Exceptions\JmixException;
 use AuraBox\Jmix\Filesystem\EnvelopeWriter;
+use AuraBox\Jmix\Security\JwsHandler;
 use AuraBox\Jmix\Validation\SchemaValidator;
 use Ramsey\Uuid\Uuid;
 
@@ -22,6 +23,7 @@ class JmixBuilder
     private DicomProcessor $dicomProcessor;
     private SchemaValidator $validator;
     private AssertionBuilder $assertionBuilder;
+    private JwsHandler $jwsHandler;
     private string $lastDicomPath = '';
 
     public function __construct(?string $schemaPath = null)
@@ -29,6 +31,7 @@ class JmixBuilder
         $this->dicomProcessor = new DicomProcessor();
         $this->validator = new SchemaValidator($schemaPath);
         $this->assertionBuilder = new AssertionBuilder();
+        $this->jwsHandler = new JwsHandler();
     }
 
     /**
@@ -76,6 +79,11 @@ class JmixBuilder
         // Verify assertions if requested
         if (isset($config['verifyAssertions']) && $config['verifyAssertions']) {
             $this->verifyAssertions($envelope);
+        }
+
+        // Generate JWS for manifest if signing key provided
+        if (isset($config['jws_signing_key'])) {
+            $envelope = $this->generateManifestJws($envelope, $config['jws_signing_key']);
         }
 
         return $envelope;
@@ -226,6 +234,25 @@ class JmixBuilder
 
 
     /**
+     * Generate JWS for manifest signing
+     */
+    private function generateManifestJws(array $envelope, string $privateKey): array
+    {
+        // Create JWS for the manifest
+        $jws = $this->jwsHandler->createJws($envelope['manifest'], $privateKey);
+        
+        // Add JWS reference to security block
+        $envelope['manifest']['security']['jws'] = [
+            'jws_file' => 'manifest.jws'
+        ];
+        
+        // Store JWS content for later writing
+        $envelope['manifest_jws'] = $jws;
+        
+        return $envelope;
+    }
+
+    /**
      * Build security configuration
      */
     private function buildSecurity(array $securityConfig): array
@@ -235,12 +262,8 @@ class JmixBuilder
             'payload_hash' => '', // Will be calculated after payload is written
         ];
 
-        // Only include signature if provided in config
-        if (isset($securityConfig['signature'])) {
-            $security['signature'] = $securityConfig['signature'];
-        }
-
         // Encryption block will be added later if encryption is enabled
+        // JWS block will be added later if JWS signing is enabled
         return $security;
     }
 
@@ -371,9 +394,9 @@ class JmixBuilder
         $writer->writeJson('audit.json', $envelope['audit']);
         $writer->writeJson('payload/metadata.json', $envelope['metadata']);
 
-        // Write optional manifest.jws if present
+        // Write optional manifest.jws if present (as text, not JSON)
         if (isset($envelope['manifest_jws'])) {
-            $writer->writeJson('manifest.jws', $envelope['manifest_jws']);
+            $writer->writeFile('manifest.jws', $envelope['manifest_jws']);
         }
 
         // Copy DICOM files to payload/dicom/

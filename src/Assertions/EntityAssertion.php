@@ -193,12 +193,14 @@ abstract class EntityAssertion
 
     /**
      * Calculate SHA-256 fingerprint of public key
+     * Format matches schema pattern: ^SHA256:[A-Fa-f0-9]+$
      */
     private function calculateFingerprint(string $publicKeyBase64): string
     {
         $publicKeyBinary = base64_decode($publicKeyBase64);
         $hash = hash('sha256', $publicKeyBinary);
-        return 'SHA256:' . $hash;
+        // Use uppercase hex to match schema pattern
+        return 'SHA256:' . strtoupper($hash);
     }
 
     /**

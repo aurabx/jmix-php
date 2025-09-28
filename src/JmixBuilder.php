@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace AuraBox\Jmix;
 
+use AuraBox\Jmix\Assertions\AssertionBuilder;
+use AuraBox\Jmix\Assertions\SenderAssertion;
+use AuraBox\Jmix\Assertions\RequesterAssertion;
+use AuraBox\Jmix\Assertions\ReceiverAssertion;
 use AuraBox\Jmix\Dicom\DicomProcessor;
 use AuraBox\Jmix\Exceptions\JmixException;
 use AuraBox\Jmix\Filesystem\EnvelopeWriter;
@@ -17,12 +21,14 @@ class JmixBuilder
 {
     private DicomProcessor $dicomProcessor;
     private SchemaValidator $validator;
+    private AssertionBuilder $assertionBuilder;
     private string $lastDicomPath = '';
 
     public function __construct(?string $schemaPath = null)
     {
         $this->dicomProcessor = new DicomProcessor();
         $this->validator = new SchemaValidator($schemaPath);
+        $this->assertionBuilder = new AssertionBuilder();
     }
 
     /**
@@ -58,11 +64,21 @@ class JmixBuilder
         $this->validator->validateMetadata($metadata);
         $this->validator->validateAudit($audit);
 
-        return [
+        $envelope = [
             'manifest' => $manifest,
             'metadata' => $metadata,
             'audit' => $audit,
         ];
+
+        // Generate signatures for any configured assertions
+        $envelope = $this->signAssertions($envelope, $config);
+
+        // Verify assertions if requested
+        if (isset($config['verifyAssertions']) && $config['verifyAssertions']) {
+            $this->verifyAssertions($envelope);
+        }
+
+        return $envelope;
     }
 
     /**
@@ -70,13 +86,19 @@ class JmixBuilder
      */
     private function buildManifest(string $id, string $timestamp, array $config, array $dicomMetadata): array
     {
+        // Build receivers with proper index tracking for assertions
+        $receivers = [];
+        foreach ($config['receivers'] as $index => $receiverConfig) {
+            $receivers[] = $this->buildEntity($receiverConfig, 'receiver', $index);
+        }
+
         return [
             'version' => $config['version'] ?? '1.0',
             'id' => $id,
             'timestamp' => $timestamp,
-            'sender' => $this->buildEntity($config['sender']),
-            'requester' => $this->buildEntity($config['requester']),
-            'receiver' => array_map([$this, 'buildEntity'], $config['receivers']),
+            'sender' => $this->buildEntity($config['sender'], 'sender'),
+            'requester' => $this->buildEntity($config['requester'], 'requester'),
+            'receiver' => $receivers,
             'security' => $this->buildSecurity($config['security'] ?? []),
             'extensions' => [
                 'custom_tags' => $config['custom_tags'] ?? [],
@@ -122,15 +144,84 @@ class JmixBuilder
     }
 
     /**
-     * Build an entity (sender, requester, receiver)
+     * Build an entity (sender, requester, receiver) with optional assertion
      */
-    private function buildEntity(array $entityConfig): array
+    private function buildEntity(array $entityConfig, string $entityType = 'generic', int $receiverIndex = 0): array
     {
-        return [
+        $entity = [
             'name' => $entityConfig['name'],
             'id' => $entityConfig['id'],
             'contact' => $entityConfig['contact'],
         ];
+
+        // Add assertion if configured
+        if (isset($entityConfig['assertion'])) {
+            $entity['assertion'] = $this->buildAssertion($entityConfig['assertion'], $entityType, $receiverIndex);
+        }
+
+        return $entity;
+    }
+
+    /**
+     * Build assertion for an entity
+     */
+    private function buildAssertion(array $assertionConfig, string $entityType, int $receiverIndex = 0): array
+    {
+        // Create the appropriate assertion type
+        $assertion = match ($entityType) {
+            'sender' => $this->assertionBuilder->createSenderAssertion($assertionConfig),
+            'requester' => $this->assertionBuilder->createRequesterAssertion($assertionConfig),
+            'receiver' => $this->assertionBuilder->createReceiverAssertion($assertionConfig, $receiverIndex),
+            default => throw new JmixException("Unknown entity type for assertion: {$entityType}")
+        };
+
+        return $assertion->toArray();
+    }
+
+    /**
+     * Sign assertions in the envelope
+     */
+    private function signAssertions(array $envelope, array $config): array
+    {
+        // Sign sender assertion if configured
+        if (isset($config['sender']['assertion']['private_key'])) {
+            $assertion = $this->assertionBuilder->createSenderAssertion($config['sender']['assertion']);
+            $signature = $assertion->signFields($envelope);
+            $envelope['manifest']['sender']['assertion']['signature'] = $signature;
+        }
+
+        // Sign requester assertion if configured
+        if (isset($config['requester']['assertion']['private_key'])) {
+            $assertion = $this->assertionBuilder->createRequesterAssertion($config['requester']['assertion']);
+            $signature = $assertion->signFields($envelope);
+            $envelope['manifest']['requester']['assertion']['signature'] = $signature;
+        }
+
+        // Sign receiver assertions if configured
+        if (isset($config['receivers'])) {
+            foreach ($config['receivers'] as $index => $receiverConfig) {
+                if (isset($receiverConfig['assertion']['private_key'])) {
+                    $assertion = $this->assertionBuilder->createReceiverAssertion($receiverConfig['assertion'], $index);
+                    $signature = $assertion->signFields($envelope);
+                    $envelope['manifest']['receiver'][$index]['assertion']['signature'] = $signature;
+                }
+            }
+        }
+
+        return $envelope;
+    }
+
+    /**
+     * Verify all assertions in the envelope
+     */
+    private function verifyAssertions(array $envelope): void
+    {
+        $results = $this->assertionBuilder->verifyEnvelopeAssertions($envelope);
+        
+        if (!$results['valid']) {
+            $errorMessage = 'Assertion verification failed: ' . implode(', ', $results['errors']);
+            throw new JmixException($errorMessage);
+        }
     }
 
 

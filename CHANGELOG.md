@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-09-28
+
+### Added
+- **🔐 Entity Assertions**: Full cryptographic identity verification for JMIX envelopes
+  - `EntityAssertion` base class with Ed25519 signature support
+  - `SenderAssertion`, `RequesterAssertion`, and `ReceiverAssertion` specialized classes  
+  - `AssertionBuilder` factory and validation service
+  - Automatic signature generation over canonicalized envelope fields
+  - Memory-safe private key handling with secure clearing
+  - Support for key references and directory attestations
+  - Optional assertion expiry validation
+- **CLI Enhancements**:
+  - **`jmix-keygen`**: New Ed25519 keypair generator with multiple output formats
+    - JSON format for programmatic use
+    - Config format for ready-to-use JMIX configuration snippets
+    - Separate format for manual key handling
+    - Support for generating multiple keypairs
+    - Entity type hints (sender, requester, receiver)
+  - **Enhanced `jmix-build`**: Assertion status reporting and configuration guidance
+  - **Enhanced `jmix-decrypt`**: New `--verify-assertions` flag for cryptographic verification
+- **Security Features**:
+  - Ed25519 digital signatures for non-repudiation
+  - Field-level signing with configurable signed fields
+  - JSON canonicalization for deterministic signatures  
+  - Forward-compatible directory attestation support
+  - Integration with existing AES-256-GCM encryption
+
+### Changed
+- **Enhanced JmixBuilder**: 
+  - Automatic detection and processing of assertion configurations
+  - Optional signature verification via `verifyAssertions` config flag
+  - Schema-compliant assertion embedding in manifest entities
+- **Improved CLI Output**:
+  - `jmix-build` now reports assertion count and verification status
+  - `jmix-decrypt analyze` shows assertion presence and optional verification
+  - Enhanced help text with assertion examples and keypair generation guidance
+
+### Security
+- **Non-repudiation**: Cryptographic proof of envelope sender identity
+- **Tamper Evidence**: Any modification to signed fields invalidates signatures
+- **Offline Verification**: Assertion validation works without directory dependencies
+- **Memory Safety**: Private keys are securely cleared after use
+- **Standards Compliance**: Ed25519 signatures follow RFC 8032 specification
+
+### Configuration
+
+#### Entity Assertions Configuration
+```json
+{
+  "sender": {
+    "name": "Healthcare Provider A",
+    "id": "org:healthcare.provider.a",
+    "contact": "admin@provider-a.com",
+    "assertion": {
+      "public_key": "<base64-ed25519-public-key>",
+      "private_key": "<base64-ed25519-private-key>",
+      "key_reference": "aurabox://org/provider-a#key-ed25519",
+      "signed_fields": ["sender.id", "sender.name", "id", "timestamp"],
+      "expires_at": "2025-12-31T23:59:59Z"
+    }
+  },
+  "verifyAssertions": true
+}
+```
+
+#### CLI Usage Examples
+```bash
+# Generate keypairs for assertions
+jmix-keygen --format config --entity sender
+
+# Build envelope with assertions
+jmix-build /dicom config-with-assertions.json /output
+
+# Analyze and verify assertions
+jmix-decrypt analyze envelope.JMIX --verify-assertions
+```
+
+### Testing
+- **28 PHPUnit tests**: Comprehensive test coverage including assertion functionality
+- **Error handling**: Tests for malformed configurations and invalid signatures
+- **Integration tests**: JmixBuilder with assertions, encryption, and schema validation
+- **CLI testing**: Verification of assertion generation and validation workflows
+
+### Backward Compatibility
+- **Zero breaking changes**: Existing JMIX envelopes continue working without modification
+- **Optional feature**: Assertions only added when configured in entity objects
+- **Schema compliance**: Works with existing `manifest.schema.json` assertion definitions
+- **Encryption compatibility**: Seamlessly integrates with AES-256-GCM payload encryption
+
 ## [0.3.0] - 2025-09-27
 
 ### Added

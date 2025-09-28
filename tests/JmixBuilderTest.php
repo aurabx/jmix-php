@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace AuraBox\Jmix\Tests;
 
+use AuraBox\Jmix\Assertions\EntityAssertion;
 use AuraBox\Jmix\JmixBuilder;
 use AuraBox\Jmix\Exceptions\JmixException;
 use PHPUnit\Framework\TestCase;
@@ -183,6 +184,115 @@ class JmixBuilderTest extends TestCase
         // Verify payload hash is calculated for encrypted file
         $this->assertArrayHasKey('payload_hash', $manifestJson['security']);
         $this->assertStringStartsWith('sha256:', $manifestJson['security']['payload_hash']);
+    }
+
+    public function testBuildFromDicomWithAssertions(): void
+    {
+        if (!extension_loaded('sodium')) {
+            $this->markTestSkipped('Sodium extension is not available');
+        }
+
+        // Create a dummy DICOM file
+        $dicomPath = $this->tempDir . '/dicom';
+        mkdir($dicomPath, 0755, true);
+        $dummyDicomFile = $dicomPath . '/test.dcm';
+        $dummyData = str_repeat("\x00", 128) . 'DICM' . str_repeat("\x00", 100);
+        file_put_contents($dummyDicomFile, $dummyData);
+
+        // Generate keypairs for assertions
+        $senderKeypair = EntityAssertion::generateKeypair();
+        $requesterKeypair = EntityAssertion::generateKeypair();
+
+        $config = $this->getValidConfig();
+        
+        // Add assertions to config
+        $config['sender']['assertion'] = [
+            'public_key' => $senderKeypair['public_key'],
+            'private_key' => $senderKeypair['private_key'],
+            'key_reference' => 'test://sender#key',
+            'expires_at' => '2025-12-31T23:59:59Z'
+        ];
+        
+        $config['requester']['assertion'] = [
+            'public_key' => $requesterKeypair['public_key'],
+            'private_key' => $requesterKeypair['private_key'],
+            'key_reference' => 'test://requester#key',
+            'expires_at' => '2025-12-31T23:59:59Z'
+        ];
+        
+        // Enable assertion verification
+        $config['verifyAssertions'] = true;
+
+        $envelope = $this->builder->buildFromDicom($dicomPath, $config);
+
+        // Verify envelope structure with assertions
+        $this->assertIsArray($envelope);
+        $this->assertArrayHasKey('manifest', $envelope);
+        $this->assertArrayHasKey('metadata', $envelope);
+        $this->assertArrayHasKey('audit', $envelope);
+
+        // Check that assertions were added to manifest
+        $manifest = $envelope['manifest'];
+        $this->assertArrayHasKey('assertion', $manifest['sender']);
+        $this->assertArrayHasKey('assertion', $manifest['requester']);
+        
+        // Verify sender assertion structure
+        $senderAssertion = $manifest['sender']['assertion'];
+        $this->assertArrayHasKey('signing_key', $senderAssertion);
+        $this->assertArrayHasKey('signed_fields', $senderAssertion);
+        $this->assertArrayHasKey('signature', $senderAssertion);
+        $this->assertEquals('Ed25519', $senderAssertion['signing_key']['alg']);
+        $this->assertEquals($senderKeypair['public_key'], $senderAssertion['signing_key']['public_key']);
+        $this->assertStringStartsWith('SHA256:', $senderAssertion['signing_key']['fingerprint']);
+        $this->assertEquals('test://sender#key', $senderAssertion['key_reference']);
+        $this->assertNotEmpty($senderAssertion['signature']);
+        
+        // Verify requester assertion structure
+        $requesterAssertion = $manifest['requester']['assertion'];
+        $this->assertArrayHasKey('signing_key', $requesterAssertion);
+        $this->assertArrayHasKey('signed_fields', $requesterAssertion);
+        $this->assertArrayHasKey('signature', $requesterAssertion);
+        $this->assertEquals('Ed25519', $requesterAssertion['signing_key']['alg']);
+        $this->assertEquals($requesterKeypair['public_key'], $requesterAssertion['signing_key']['public_key']);
+        $this->assertEquals('test://requester#key', $requesterAssertion['key_reference']);
+        $this->assertNotEmpty($requesterAssertion['signature']);
+        
+        // Verify signed fields contain expected values
+        $this->assertContains('sender.id', $senderAssertion['signed_fields']);
+        $this->assertContains('sender.name', $senderAssertion['signed_fields']);
+        $this->assertContains('id', $senderAssertion['signed_fields']);
+        $this->assertContains('timestamp', $senderAssertion['signed_fields']);
+        
+        $this->assertContains('requester.id', $requesterAssertion['signed_fields']);
+        $this->assertContains('requester.name', $requesterAssertion['signed_fields']);
+        $this->assertContains('id', $requesterAssertion['signed_fields']);
+        $this->assertContains('timestamp', $requesterAssertion['signed_fields']);
+    }
+
+    public function testBuildFromDicomWithAssertionsValidationFailure(): void
+    {
+        if (!extension_loaded('sodium')) {
+            $this->markTestSkipped('Sodium extension is not available');
+        }
+
+        // Create a dummy DICOM file
+        $dicomPath = $this->tempDir . '/dicom';
+        mkdir($dicomPath, 0755, true);
+        $dummyDicomFile = $dicomPath . '/test.dcm';
+        $dummyData = str_repeat("\x00", 128) . 'DICM' . str_repeat("\x00", 100);
+        file_put_contents($dummyDicomFile, $dummyData);
+
+        $keypair = EntityAssertion::generateKeypair();
+        $config = $this->getValidConfig();
+        
+        // Add malformed assertion config
+        $config['sender']['assertion'] = [
+            'public_key' => 'invalid-base64!',
+            'private_key' => $keypair['private_key']
+        ];
+        
+        $this->expectException(JmixException::class);
+        $this->builder->buildFromDicom($dicomPath, $config);
     }
 
     private function getValidConfig(): array

@@ -4,6 +4,7 @@
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use AuraBox\Jmix\JmixDecryptor;
+use AuraBox\Jmix\Assertions\AssertionBuilder;
 
 function showUsage(): void
 {
@@ -14,6 +15,9 @@ function showUsage(): void
     echo "  extract <envelope-path> <output-path>     Extract unencrypted envelope\n";
     echo "  decrypt <envelope-path> <output-path> <private-key>  Decrypt encrypted envelope\n";
     echo "\n";
+    echo "Options:\n";
+    echo "  --verify-assertions      Verify cryptographic assertions (analyze command)\n";
+    echo "\n";
     echo "Arguments:\n";
     echo "  envelope-path    Path to .JMIX envelope directory\n";
     echo "  output-path      Output directory for extracted contents\n";
@@ -21,6 +25,7 @@ function showUsage(): void
     echo "\n";
     echo "Examples:\n";
     echo "  jmix-decrypt analyze /path/to/envelope.JMIX\n";
+    echo "  jmix-decrypt analyze /path/to/envelope.JMIX --verify-assertions\n";
     echo "  jmix-decrypt extract /path/to/envelope.JMIX /path/to/output\n";
     echo "  jmix-decrypt decrypt /path/to/encrypted.JMIX /path/to/output GQy1VEgjT4bH+fo...\n";
     echo "\n";
@@ -34,6 +39,14 @@ if ($argc < 3) {
 
 $command = $argv[1];
 $envelopePath = $argv[2];
+$verifyAssertions = false;
+
+// Parse options
+for ($i = 3; $i < $argc; $i++) {
+    if ($argv[$i] === '--verify-assertions') {
+        $verifyAssertions = true;
+    }
+}
 
 try {
     echo "JMIX Envelope Decryptor\n";
@@ -86,6 +99,76 @@ try {
             echo "  audit.json: " . ($analysis['files']['audit'] ? '✓' : '✗') . "\n";
             echo "  payload/: " . ($analysis['files']['payload_directory'] ? '✓' : '✗') . "\n";
             echo "  payload.encrypted: " . ($analysis['files']['payload_encrypted'] ? '✓' : '✗') . "\n";
+            
+            // Check for assertions and optionally verify them
+            $assertionBuilder = new AssertionBuilder();
+            $hasAssertions = false;
+            $assertionCount = 0;
+            
+            // Count assertions
+            if (isset($analysis['sender']['assertion'])) {
+                $hasAssertions = true;
+                $assertionCount++;
+            }
+            if (isset($analysis['requester']['assertion'])) {
+                $hasAssertions = true;
+                $assertionCount++;
+            }
+            if (!empty($analysis['receivers'])) {
+                foreach ($analysis['receivers'] as $receiver) {
+                    if (isset($receiver['assertion'])) {
+                        $hasAssertions = true;
+                        $assertionCount++;
+                    }
+                }
+            }
+            
+            echo "\nEntity Assertions:\n";
+            echo "  Count: {$assertionCount}\n";
+            echo "  Present: " . ($hasAssertions ? '✓ Yes' : '✗ No') . "\n";
+            
+            // Verify assertions if requested and present
+            if ($verifyAssertions && $hasAssertions) {
+                echo "\nAssertion Verification:\n";
+                try {
+                    // Read full envelope for verification
+                    $manifest = json_decode(file_get_contents($envelopePath . '/manifest.json'), true);
+                    $envelope = ['manifest' => $manifest];
+                    
+                    $verificationResults = $assertionBuilder->verifyEnvelopeAssertions($envelope);
+                    
+                    echo "  Status: " . ($verificationResults['valid'] ? '✓ VALID' : '❌ INVALID') . "\n";
+                    
+                    if ($verificationResults['sender']) {
+                        $status = $verificationResults['sender']['valid'] ? '✓' : '❌';
+                        $expired = $verificationResults['sender']['expired'] ? ' (EXPIRED)' : '';
+                        echo "  Sender: {$status} {$verificationResults['sender']['fingerprint']}{$expired}\n";
+                    }
+                    
+                    if ($verificationResults['requester']) {
+                        $status = $verificationResults['requester']['valid'] ? '✓' : '❌';
+                        $expired = $verificationResults['requester']['expired'] ? ' (EXPIRED)' : '';
+                        echo "  Requester: {$status} {$verificationResults['requester']['fingerprint']}{$expired}\n";
+                    }
+                    
+                    foreach ($verificationResults['receivers'] as $index => $receiver) {
+                        $status = $receiver['valid'] ? '✓' : '❌';
+                        $expired = $receiver['expired'] ? ' (EXPIRED)' : '';
+                        echo "  Receiver[{$index}]: {$status} {$receiver['fingerprint']}{$expired}\n";
+                    }
+                    
+                    if (!empty($verificationResults['errors'])) {
+                        echo "\n  Errors:\n";
+                        foreach ($verificationResults['errors'] as $error) {
+                            echo "    - {$error}\n";
+                        }
+                    }
+                } catch (Exception $e) {
+                    echo "  Status: ❌ ERROR - " . $e->getMessage() . "\n";
+                }
+            } elseif ($verifyAssertions && !$hasAssertions) {
+                echo "  Verification: Skipped (no assertions present)\n";
+            }
             
             break;
 

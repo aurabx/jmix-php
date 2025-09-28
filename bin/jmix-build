@@ -15,9 +15,17 @@ function showUsage(): void
     echo "  output-path  Output directory for JMIX files\n";
     echo "  schema-path  Optional path to schema files directory\n";
     echo "\n";
+    echo "Configuration Features:\n";
+    echo "  Entity assertions - Add 'assertion' objects to sender/requester/receivers\n";
+    echo "  Assertion verification - Set 'verifyAssertions': true in config\n";
+    echo "  Encryption - Add 'encryption.recipient_public_key' in config\n";
+    echo "\n";
     echo "Examples:\n";
     echo "  jmix-build /path/to/dicom config.json /path/to/output\n";
     echo "  jmix-build /path/to/dicom config.json /path/to/output /path/to/schemas\n";
+    echo "  jmix-build /path/to/dicom config-with-assertions.json /path/to/output\n";
+    echo "\n";
+    echo "Generate keypairs: jmix-keygen --format config --entity sender\n";
     echo "\n";
 }
 
@@ -66,8 +74,36 @@ try {
     echo "Saving JMIX envelope to: {$outputPath}\n";
     $envelopePath = $jmixBuilder->saveToFiles($envelope, $outputPath, $config);
 
-    echo "\n✓ JMIX envelope created successfully!\n";
+    echo "✓ JMIX envelope created successfully!\n";
     echo "\nEnvelope directory: {$envelopePath}\n";
+    
+    // Check and report assertion status
+    $hasAssertions = false;
+    $assertionCount = 0;
+    if (isset($envelope['manifest']['sender']['assertion'])) {
+        $hasAssertions = true;
+        $assertionCount++;
+    }
+    if (isset($envelope['manifest']['requester']['assertion'])) {
+        $hasAssertions = true;
+        $assertionCount++;
+    }
+    if (isset($envelope['manifest']['receiver'])) {
+        foreach ($envelope['manifest']['receiver'] as $receiver) {
+            if (isset($receiver['assertion'])) {
+                $hasAssertions = true;
+                $assertionCount++;
+            }
+        }
+    }
+    
+    if ($hasAssertions) {
+        echo "\n🔐 Entity Assertions: {$assertionCount} cryptographic assertion(s) generated\n";
+        if (isset($config['verifyAssertions']) && $config['verifyAssertions']) {
+            echo "✓ Assertion verification: PASSED\n";
+        }
+    }
+    
     echo "\nGenerated files:\n";
     echo "  - manifest.json\n";
     echo "  - audit.json\n";

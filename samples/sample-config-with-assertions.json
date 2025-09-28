@@ -1,0 +1,79 @@
+{
+    "version": "1.0",
+    "sender": {
+        "name": "Radiology Clinic A",
+        "id": "org:au.gov.health.123456", 
+        "contact": "imaging@clinica.org.au",
+        "assertion": {
+            "public_key": "4LFMF8cpMvzXVzBGuvBzDdhzYsdzB7x4J34I+nVbgvc=",
+            "private_key": "517zPVq8pdgZbFoWwv3nyl0i2cM9rng5XNisrbfIPDjgsUwXxyky/NdXMEa68HMN2HNix3MHvHgnfgj6dVuC9w==",
+            "key_reference": "aurabox://org/clinic-a#key-ed25519",
+            "signed_fields": ["sender.id", "sender.name", "sender.contact", "id", "timestamp"],
+            "expires_at": "2025-12-31T23:59:59Z"
+        }
+    },
+    "requester": {
+        "name": "Dr John Smith",
+        "id": "org:au.gov.health.55555",
+        "contact": "smith@clinicb.org.au",
+        "assertion": {
+            "public_key": "Bxqojr2qgX4eFQAWvS0tm+sAxiDRY3tCP1SrOtGb8xM=",
+            "private_key": "n6jCfhnZbiLgEiING1ozFvEHI8D//2PVNE1flvm15ZIHGqiOvaqBfh4VABa9LS2b6wDGINFje0I/VKs60ZvzEw==",
+            "key_reference": "aurabox://org/clinic-b#key-ed25519",
+            "signed_fields": ["requester.id", "requester.name", "requester.contact", "id", "timestamp"],
+            "expires_at": "2025-12-31T23:59:59Z"
+        }
+    },
+    "receivers": [
+        {
+            "name": "Radiology Clinic B", 
+            "id": "org:au.gov.health.987654",
+            "contact": {
+                "system": "phone",
+                "value": "+61049555555"
+            }
+        }
+    ],
+    "patient": {
+        "name": "Jane Doe",
+        "dob": "1975-02-14", 
+        "sex": "F",
+        "ihi": "8003608166690503",
+        "identifiers": [
+            {
+                "system": "http://ns.electronichealth.net.au/id/ihi/1.0",
+                "value": "8003608166690503"
+            },
+            {
+                "system": "urn:oid:1.2.36.146.595.217.0.1",
+                "value": "MRN123456"
+            }
+        ]
+    },
+    "report": {
+        "file": "files/report.pdf",
+        "url": "https://some.url.with.a.report"
+    },
+    "files": {
+        "file": "files/dicom-images.zip", 
+        "url": "https://some.url.with.dicom.files"
+    },
+    "custom_tags": [
+        "teaching",
+        "priority-review"
+    ],
+    "security": {
+        "classification": "confidential"
+    },
+    "consent": {
+        "status": "granted",
+        "scope": ["treatment", "research"],
+        "method": "digital-signature"
+    },
+    "deid_keys": [
+        "PatientName",
+        "PatientID", 
+        "IssuerOfPatientID"
+    ],
+    "verifyAssertions": true
+}

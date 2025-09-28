@@ -1,0 +1,191 @@
+#!/usr/bin/env php
+<?php
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+use AuraBox\Jmix\Assertions\EntityAssertion;
+
+function showUsage(): void
+{
+    echo "Usage: jmix-keygen [options]\n";
+    echo "\n";
+    echo "Generate Ed25519 keypairs for JMIX entity assertions\n";
+    echo "\n";
+    echo "Options:\n";
+    echo "  --count <n>      Generate <n> keypairs (default: 1)\n";
+    echo "  --format <fmt>   Output format: json|config|separate (default: json)\n";
+    echo "  --entity <type>  Entity type hint: sender|requester|receiver (default: sender)\n";
+    echo "  --help           Show this help message\n";
+    echo "\n";
+    echo "Output Formats:\n";
+    echo "  json      - JSON object with public_key and private_key\n";
+    echo "  config    - Ready-to-use config snippet for JMIX\n";
+    echo "  separate  - Public and private keys on separate lines\n";
+    echo "\n";
+    echo "Examples:\n";
+    echo "  jmix-keygen\n";
+    echo "  jmix-keygen --count 2 --format config --entity requester\n";
+    echo "  jmix-keygen --format separate\n";
+    echo "\n";
+}
+
+/**
+ * Generate default signed fields for entity type
+ */
+function getDefaultSignedFields(string $entityType): array
+{
+    return match ($entityType) {
+        'sender' => ['sender.id', 'sender.name', 'sender.contact', 'id', 'timestamp'],
+        'requester' => ['requester.id', 'requester.name', 'requester.contact', 'id', 'timestamp'],
+        'receiver' => ['receiver.0.id', 'receiver.0.name', 'receiver.0.contact', 'id', 'timestamp'],
+        default => ['id', 'timestamp']
+    };
+}
+
+/**
+ * Output keypair in JSON format
+ */
+function outputJson(array $keypair): void
+{
+    echo json_encode($keypair, JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT). "\n";
+}
+
+/**
+ * Output keypair in config format
+ */
+function outputConfig(array $keypair, string $entityType): void
+{
+    $signedFields = getDefaultSignedFields($entityType);
+    $config = [
+        'assertion' => [
+            'public_key' => $keypair['public_key'],
+            'private_key' => $keypair['private_key'],
+            'key_reference' => "aurabox://org/your-org#key-ed25519",
+            'signed_fields' => $signedFields,
+            'expires_at' => date('Y-m-d\TH:i:s\Z', strtotime('+1 year'))
+        ]
+    ];
+    
+    echo "\"assertion\": " .json_encode($config['assertion'], JSON_THROW_ON_ERROR | JSON_PRETTY_PRINT). "\n";
+}
+
+/**
+ * Output keypair in separate lines format
+ */
+function outputSeparate(array $keypair): void
+{
+    echo "Public Key:  " . $keypair['public_key'] . "\n";
+    echo "Private Key: " . $keypair['private_key'] . "\n";
+}
+
+// Parse command line arguments
+$options = [
+    'count' => 1,
+    'format' => 'json',
+    'entity' => 'sender',
+    'help' => false
+];
+
+$args = array_slice($argv, 1);
+for ($i = 0, $iMax = count($args); $i < $iMax; $i++) {
+    switch ($args[$i]) {
+        case '--count':
+            if ($i + 1 < count($args)) {
+                $options['count'] = (int) $args[++$i];
+            }
+            break;
+        case '--format':
+            if ($i + 1 < count($args)) {
+                $format = $args[++$i];
+                if (in_array($format, ['json', 'config', 'separate'])) {
+                    $options['format'] = $format;
+                } else {
+                    echo "❌ Error: Invalid format '$format'\n\n";
+                    showUsage();
+                    exit(1);
+                }
+            }
+            break;
+        case '--entity':
+            if ($i + 1 < count($args)) {
+                $entity = $args[++$i];
+                if (in_array($entity, ['sender', 'requester', 'receiver'])) {
+                    $options['entity'] = $entity;
+                } else {
+                    echo "❌ Error: Invalid entity type '$entity'\n\n";
+                    showUsage();
+                    exit(1);
+                }
+            }
+            break;
+        case '--help':
+            $options['help'] = true;
+            break;
+        default:
+            echo "❌ Error: Unknown option '{$args[$i]}'\n\n";
+            showUsage();
+            exit(1);
+    }
+}
+
+if ($options['help']) {
+    showUsage();
+    exit(0);
+}
+
+try {
+    echo "🔐 JMIX Ed25519 Keypair Generator\n";
+    echo "=================================\n\n";
+
+    if (!extension_loaded('sodium')) {
+        echo "❌ Error: Sodium extension is required for Ed25519 key generation\n";
+        exit(1);
+    }
+
+    if ($options['count'] < 1 || $options['count'] > 10) {
+        echo "❌ Error: Count must be between 1 and 10\n";
+        exit(1);
+    }
+
+    for ($i = 0; $i < $options['count']; $i++) {
+        if ($options['count'] > 1) {
+            echo "Keypair " . ($i + 1) . ":\n";
+        }
+
+        $keypair = EntityAssertion::generateKeypair();
+
+        switch ($options['format']) {
+            case 'json':
+                outputJson($keypair);
+                break;
+            case 'config':
+                outputConfig($keypair, $options['entity']);
+                break;
+            case 'separate':
+                outputSeparate($keypair);
+                break;
+        }
+
+        if ($options['count'] > 1 && $i < $options['count'] - 1) {
+            echo "\n";
+        }
+    }
+
+    if ($options['format'] === 'config') {
+        echo "\n💡 Remember to:\n";
+        echo "  1. Update the key_reference URI for your organization\n";
+        echo "  2. Adjust signed_fields if needed\n";
+        echo "  3. Set appropriate expires_at timestamp\n";
+        echo "  4. Keep private keys secure!\n";
+    }
+
+    echo "\n🔒 Security Notes:\n";
+    echo "  - Store private keys securely (HSM, encrypted storage, etc.)\n";
+    echo "  - Never commit private keys to version control\n";
+    echo "  - Consider key rotation policies\n";
+    echo "  - Public keys can be shared safely\n";
+
+} catch (Exception $e) {
+    echo "❌ Error: " . $e->getMessage() . "\n";
+    exit(1);
+}

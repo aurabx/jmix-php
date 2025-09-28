@@ -1,0 +1,160 @@
+#!/usr/bin/env php
+<?php
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+use AuraBox\Jmix\JmixDecryptor;
+
+function showUsage(): void
+{
+    echo "Usage: jmix-decrypt <command> <envelope-path> [options]\n";
+    echo "\n";
+    echo "Commands:\n";
+    echo "  analyze <envelope-path>                    Analyze envelope without extracting\n";
+    echo "  extract <envelope-path> <output-path>     Extract unencrypted envelope\n";
+    echo "  decrypt <envelope-path> <output-path> <private-key>  Decrypt encrypted envelope\n";
+    echo "\n";
+    echo "Arguments:\n";
+    echo "  envelope-path    Path to .JMIX envelope directory\n";
+    echo "  output-path      Output directory for extracted contents\n";
+    echo "  private-key      Base64-encoded private key for decryption\n";
+    echo "\n";
+    echo "Examples:\n";
+    echo "  jmix-decrypt analyze /path/to/envelope.JMIX\n";
+    echo "  jmix-decrypt extract /path/to/envelope.JMIX /path/to/output\n";
+    echo "  jmix-decrypt decrypt /path/to/encrypted.JMIX /path/to/output GQy1VEgjT4bH+fo...\n";
+    echo "\n";
+}
+
+// Parse command line arguments
+if ($argc < 3) {
+    showUsage();
+    exit(1);
+}
+
+$command = $argv[1];
+$envelopePath = $argv[2];
+
+try {
+    echo "JMIX Envelope Decryptor\n";
+    echo "=======================\n\n";
+
+    $decryptor = new JmixDecryptor();
+
+    switch ($command) {
+        case 'analyze':
+            echo "Analyzing envelope: {$envelopePath}\n\n";
+            $analysis = $decryptor->analyzeEnvelope($envelopePath);
+            
+            echo "📋 Envelope Analysis\n";
+            echo "ID: {$analysis['envelope_id']}\n";
+            echo "Timestamp: {$analysis['timestamp']}\n";
+            echo "Encrypted: " . ($analysis['is_encrypted'] ? '🔒 Yes' : '🔓 No') . "\n";
+            echo "Has Payload Hash: " . ($analysis['has_payload_hash'] ? '✓ Yes' : '✗ No') . "\n";
+            
+            if ($analysis['sender']) {
+                echo "\nSender:\n";
+                echo "  Name: {$analysis['sender']['name']}\n";
+                echo "  ID: {$analysis['sender']['id']}\n";
+                echo "  Contact: {$analysis['sender']['contact']}\n";
+            }
+            
+            if ($analysis['requester']) {
+                echo "\nRequester:\n";
+                echo "  Name: {$analysis['requester']['name']}\n";
+                echo "  ID: {$analysis['requester']['id']}\n";
+                echo "  Contact: {$analysis['requester']['contact']}\n";
+            }
+            
+            if (!empty($analysis['receivers'])) {
+                echo "\nReceivers:\n";
+                foreach ($analysis['receivers'] as $receiver) {
+                    echo "  - {$receiver['name']} ({$receiver['id']})\n";
+                }
+            }
+            
+            if ($analysis['is_encrypted']) {
+                echo "\nEncryption Details:\n";
+                echo "  Algorithm: {$analysis['encryption']['algorithm']}\n";
+                echo "  Ephemeral Public Key: {$analysis['encryption']['ephemeral_public_key']}\n";
+                echo "  IV: {$analysis['encryption']['iv']}\n";
+                echo "  Auth Tag: {$analysis['encryption']['auth_tag']}\n";
+            }
+            
+            echo "\nFiles Present:\n";
+            echo "  manifest.json: " . ($analysis['files']['manifest'] ? '✓' : '✗') . "\n";
+            echo "  audit.json: " . ($analysis['files']['audit'] ? '✓' : '✗') . "\n";
+            echo "  payload/: " . ($analysis['files']['payload_directory'] ? '✓' : '✗') . "\n";
+            echo "  payload.encrypted: " . ($analysis['files']['payload_encrypted'] ? '✓' : '✗') . "\n";
+            
+            break;
+
+        case 'extract':
+            if ($argc < 4) {
+                echo "❌ Error: Output path required for extract command\n";
+                showUsage();
+                exit(1);
+            }
+            
+            $outputPath = $argv[3];
+            echo "Extracting unencrypted envelope: {$envelopePath}\n";
+            echo "Output directory: {$outputPath}\n\n";
+            
+            $envelope = $decryptor->extractEnvelope($envelopePath, $outputPath);
+            
+            echo "✓ Envelope extracted successfully!\n\n";
+            echo "📋 Envelope Contents:\n";
+            echo "  ID: {$envelope['manifest']['id']}\n";
+            echo "  Timestamp: {$envelope['manifest']['timestamp']}\n";
+            echo "  Patient: {$envelope['metadata']['patient']['name']['text']}\n";
+            echo "  Study: {$envelope['metadata']['studies']['study_description']}\n";
+            echo "  Payload Path: {$envelope['payload_path']}\n";
+            
+            break;
+
+        case 'decrypt':
+            if ($argc < 5) {
+                echo "❌ Error: Output path and private key required for decrypt command\n";
+                showUsage();
+                exit(1);
+            }
+            
+            $outputPath = $argv[3];
+            $privateKey = $argv[4];
+            
+            echo "Decrypting encrypted envelope: {$envelopePath}\n";
+            echo "Output directory: {$outputPath}\n\n";
+            
+            $envelope = $decryptor->decryptEnvelope($envelopePath, $privateKey, $outputPath);
+            
+            echo "✓ Envelope decrypted successfully!\n\n";
+            echo "🔓 Decrypted Envelope Contents:\n";
+            echo "  ID: {$envelope['manifest']['id']}\n";
+            echo "  Timestamp: {$envelope['manifest']['timestamp']}\n";
+            echo "  Patient: {$envelope['metadata']['patient']['name']['text']}\n";
+            echo "  Study: {$envelope['metadata']['studies']['study_description']}\n";
+            echo "  Payload Path: {$envelope['payload_path']}\n";
+            
+            echo "\n📁 Extracted Files:\n";
+            if (is_dir($envelope['payload_path'] . '/dicom')) {
+                echo "  - DICOM files in: {$envelope['payload_path']}/dicom/\n";
+            }
+            if (is_dir($envelope['payload_path'] . '/files')) {
+                echo "  - Attachment files in: {$envelope['payload_path']}/files/\n";
+            }
+            if (file_exists($envelope['payload_path'] . '/files.json')) {
+                echo "  - File manifest: {$envelope['payload_path']}/files.json\n";
+            }
+            
+            break;
+
+        default:
+            echo "❌ Error: Unknown command '{$command}'\n\n";
+            showUsage();
+            exit(1);
+    }
+
+} catch (Exception $e) {
+    echo "❌ Error: " . $e->getMessage() . "\n";
+    exit(1);
+}

@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Production-ready data generation**: Envelopes no longer contain any test/dummy data
 
 ### Fixed
+- Added the missing bin folder with jmix-build and jmix-decrypt scripts
 - Schema validation errors resolved - all components now validate correctly
 - Removed unused `$filename` variable in `DicomProcessor::findDicomFiles()`
 - Cross-platform dcmdump detection now works on Windows (`where` command) and Unix-like systems (`which` command)

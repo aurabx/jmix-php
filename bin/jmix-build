@@ -1,0 +1,111 @@
+#!/usr/bin/env php
+<?php
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+use AuraBox\Jmix\JmixBuilder;
+
+function showUsage(): void
+{
+    echo "Usage: jmix-build <dicom-path> <config-file> <output-path> [schema-path]\n";
+    echo "\n";
+    echo "Arguments:\n";
+    echo "  dicom-path   Path to folder containing DICOM files\n";
+    echo "  config-file  JSON configuration file\n";
+    echo "  output-path  Output directory for JMIX files\n";
+    echo "  schema-path  Optional path to schema files directory\n";
+    echo "\n";
+    echo "Examples:\n";
+    echo "  jmix-build /path/to/dicom config.json /path/to/output\n";
+    echo "  jmix-build /path/to/dicom config.json /path/to/output /path/to/schemas\n";
+    echo "\n";
+}
+
+/**
+ * @throws JsonException
+ */
+function loadConfig(string $configFile): array
+{
+    if (!file_exists($configFile)) {
+        throw new \RuntimeException("Config file not found: {$configFile}");
+    }
+
+    $config = json_decode(file_get_contents($configFile), true, 512, JSON_THROW_ON_ERROR);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new \RuntimeException("Invalid JSON in config file: " . json_last_error_msg());
+    }
+
+    return $config;
+}
+
+// Parse command line arguments
+if ($argc < 4 || $argc > 5) {
+    showUsage();
+    exit(1);
+}
+
+$dicomPath = $argv[1];
+$configFile = $argv[2];
+$outputPath = $argv[3];
+$schemaPath = $argc === 5 ? $argv[4] : null;
+
+try {
+    echo "JMIX Envelope Builder\n";
+    echo "====================\n\n";
+
+    echo "Loading configuration from: {$configFile}\n";
+    $config = loadConfig($configFile);
+
+    echo "Processing DICOM files from: {$dicomPath}\n";
+    if ($schemaPath) {
+        echo "Using schema path: {$schemaPath}\n";
+    }
+    $jmixBuilder = new JmixBuilder($schemaPath);
+    $envelope = $jmixBuilder->buildFromDicom($dicomPath, $config);
+
+    echo "Saving JMIX envelope to: {$outputPath}\n";
+    $envelopePath = $jmixBuilder->saveToFiles($envelope, $outputPath, $config);
+
+    echo "\n✓ JMIX envelope created successfully!\n";
+    echo "\nEnvelope directory: {$envelopePath}\n";
+    echo "\nGenerated files:\n";
+    echo "  - manifest.json\n";
+    echo "  - audit.json\n";
+    
+    // Check if payload is encrypted
+    $isEncrypted = file_exists($envelopePath . '/payload.encrypted');
+    if ($isEncrypted) {
+        echo "  - payload.encrypted (AES-256-GCM encrypted payload)\n";
+        echo "\n🔒 Payload encrypted with recipient public key\n";
+    } else {
+        echo "  - payload/\n";
+        echo "    - metadata.json\n";
+        echo "    - dicom/ (" . (is_dir($envelopePath . '/payload/dicom') ? 'copied from source' : 'not available') . ")\n";
+        if (is_dir($envelopePath . '/payload/files')) {
+            echo "    - files/ (attachments)\n";
+            if (file_exists($envelopePath . '/payload/files.json')) {
+                echo "    - files.json (manifest)\n";
+            }
+        }
+    }
+
+    echo "\nEnvelope Summary:\n";
+    echo "  ID: {$envelope['manifest']['id']}\n";
+    echo "  Timestamp: {$envelope['manifest']['timestamp']}\n";
+    echo "  Patient: {$envelope['metadata']['patient']['name']['text']}\n";
+    
+    // Studies is now an object, and study_description may not exist
+    $studyDesc = $envelope['metadata']['studies']->study_description ?? 'No study description available';
+    echo "  Study: {$studyDesc}\n";
+
+} catch (Exception $e) {
+    echo "❌ Error: " . $e->getMessage() . "\n";
+    
+    if (method_exists($e, 'getErrors')) {
+        echo "\nValidation errors:\n";
+        foreach ($e->getErrors() as $error) {
+            echo "  - {$error}\n";
+        }
+    }
+    exit(1);
+}

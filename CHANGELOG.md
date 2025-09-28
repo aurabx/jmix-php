@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.0] - 2025-09-28
+## [0.3.0] - 2025-09-27
 
 ### Added
 - **🔐 Entity Assertions**: Full cryptographic identity verification for JMIX envelopes
@@ -31,8 +31,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - JSON canonicalization for deterministic signatures  
   - Forward-compatible directory attestation support
   - Integration with existing AES-256-GCM encryption
+- **Files.json schema validation**: Added `validateFiles()` method to `SchemaValidator` class
+- **Cross-platform dcmdump detection**: Enhanced `isDcmdumpAvailable()` to work on Windows, Linux, and macOS
+- **Schema compliance improvements**: All generated envelopes now pass strict schema validation
 
 ### Changed
+- **BREAKING**: Removed all dummy/placeholder data from envelope generation
+  - Digital signatures only included when provided in configuration
+  - Patient data fallback now uses config values instead of hardcoded "Jane Doe" etc.
+  - Patient verification data only included when provided in configuration  
+  - Consent information only included when provided in configuration
+  - Study/series data only includes actual extracted data, no dummy fallbacks
+- **Fixed schema compliance**:
+  - `studies` field now returns proper object structure instead of array
+  - `extensions` field now returns proper object structure instead of empty array
+  - Files.json manifests are now validated against `files.schema.json` schema
+- **Enhanced DicomProcessor**:
+  - Config data is now used as fallback when dcmdump is unavailable
+  - Removed unused variables and cleaned up code
+  - Cross-platform compatibility for dcmdump detection using `PHP_OS_FAMILY`
+- **Production-ready data generation**: Envelopes no longer contain any test/dummy data
 - **Enhanced JmixBuilder**: 
   - Automatic detection and processing of assertion configurations
   - Optional signature verification via `verifyAssertions` config flag
@@ -42,12 +60,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `jmix-decrypt analyze` shows assertion presence and optional verification
   - Enhanced help text with assertion examples and keypair generation guidance
 
+### Fixed
+- Added the missing bin folder with jmix-build and jmix-decrypt scripts
+- Schema validation errors resolved - all components now validate correctly
+- Removed unused `$filename` variable in `DicomProcessor::findDicomFiles()`
+- Cross-platform dcmdump detection now works on Windows (`where` command) and Unix-like systems (`which` command)
+
 ### Security
 - **Non-repudiation**: Cryptographic proof of envelope sender identity
 - **Tamper Evidence**: Any modification to signed fields invalidates signatures
 - **Offline Verification**: Assertion validation works without directory dependencies
 - **Memory Safety**: Private keys are securely cleared after use
 - **Standards Compliance**: Ed25519 signatures follow RFC 8032 specification
+
+### Removed
+- **All dummy data**: No more hardcoded patient names, signatures, consent data, or study information
+- **Placeholder values**: Removed fallback dummy data that was not schema-compliant
+- **TODO comments**: Resolved all outstanding TODO items in the codebase
 
 ### Configuration
 
@@ -93,41 +122,6 @@ jmix-decrypt analyze envelope.JMIX --verify-assertions
 - **Optional feature**: Assertions only added when configured in entity objects
 - **Schema compliance**: Works with existing `manifest.schema.json` assertion definitions
 - **Encryption compatibility**: Seamlessly integrates with AES-256-GCM payload encryption
-
-## [0.3.0] - 2025-09-27
-
-### Added
-- **Files.json schema validation**: Added `validateFiles()` method to `SchemaValidator` class
-- **Cross-platform dcmdump detection**: Enhanced `isDcmdumpAvailable()` to work on Windows, Linux, and macOS
-- **Schema compliance improvements**: All generated envelopes now pass strict schema validation
-
-### Changed
-- **BREAKING**: Removed all dummy/placeholder data from envelope generation
-  - Digital signatures only included when provided in configuration
-  - Patient data fallback now uses config values instead of hardcoded "Jane Doe" etc.
-  - Patient verification data only included when provided in configuration  
-  - Consent information only included when provided in configuration
-  - Study/series data only includes actual extracted data, no dummy fallbacks
-- **Fixed schema compliance**:
-  - `studies` field now returns proper object structure instead of array
-  - `extensions` field now returns proper object structure instead of empty array
-  - Files.json manifests are now validated against `files.schema.json` schema
-- **Enhanced DicomProcessor**:
-  - Config data is now used as fallback when dcmdump is unavailable
-  - Removed unused variables and cleaned up code
-  - Cross-platform compatibility for dcmdump detection using `PHP_OS_FAMILY`
-- **Production-ready data generation**: Envelopes no longer contain any test/dummy data
-
-### Fixed
-- Added the missing bin folder with jmix-build and jmix-decrypt scripts
-- Schema validation errors resolved - all components now validate correctly
-- Removed unused `$filename` variable in `DicomProcessor::findDicomFiles()`
-- Cross-platform dcmdump detection now works on Windows (`where` command) and Unix-like systems (`which` command)
-
-### Removed
-- **All dummy data**: No more hardcoded patient names, signatures, consent data, or study information
-- **Placeholder values**: Removed fallback dummy data that was not schema-compliant
-- **TODO comments**: Resolved all outstanding TODO items in the codebase
 
 ### Migration Guide for v0.3.0
 

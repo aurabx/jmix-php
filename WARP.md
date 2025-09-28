@@ -74,6 +74,9 @@ Tests
 - Strategy: can use either constructed dummy DICOM files with valid DICM headers or the sample data in samples/
 - Sample data provides realistic multi-series DICOM structure for comprehensive testing
 
+Security
+- Refer to .ai/security.md
+
 Notes pulled from README.md (key items only)
 - Quick start uses AuraBox\Jmix\JmixBuilder to build from a DICOM folder, then save to files
 - Optional DICOM extraction strategies: built-in placeholder parsing, DCMTK (dcmdump), or a third-party PHP DICOM library

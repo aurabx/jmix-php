@@ -15,6 +15,20 @@ A PHP library for creating and processing JMIX (JSON Medical Interchange) envelo
 - **CLI tools** for building, analyzing, and decrypting envelopes
 - **Ephemeral keys** for forward secrecy
 
+## Requirements
+
+In order to extract file information to build the files list, DCMTK is required. Without this, the library will not extract DICOM data.
+
+```bash
+# Install DCMTK on macOS
+brew install dcmtk
+
+# Install DCMTK on Ubuntu
+apt-get install dcmtk
+```
+
+The library will automatically use `dcmdump` if available.
+
 ## Installation
 
 ```bash
@@ -77,31 +91,6 @@ $encryptedEnvelope = $jmixBuilder->buildFromDicom('/path/to/dicom/files', $confi
 $encryptedPath = $jmixBuilder->saveToFiles($encryptedEnvelope, '/path/to/output', $config);
 echo "🔒 Encrypted envelope created at: {$encryptedPath}\n";
 ```
-
-## JMIX Components
-
-The library generates three main components:
-
-### 1. Manifest (`manifest.json`)
-Contains security and routing metadata:
-- Digital signatures and cryptographic assertions
-- Sender, requester, and receiver information
-- Encryption parameters
-- Security classification
-
-### 2. Metadata (`metadata.json`) 
-Contains medical/clinical data:
-- Patient information with healthcare identifiers
-- Medical imaging study details (extracted from DICOM)
-- Consent management
-- De-identification tracking
-- File/report references
-
-### 3. Audit (`audit.json`)
-Contains audit trail:
-- Event logging with timestamps
-- Chain of custody tracking
-- Cryptographic signatures for events
 
 ## Encryption and Decryption
 
@@ -259,15 +248,6 @@ Output:
   - Attachment files in: /path/to/output/payload/files/
 ```
 
-### Security Features
-
-- **AES-256-GCM Encryption**: Authenticated encryption providing both confidentiality and integrity
-- **ECDH Key Exchange**: Uses Curve25519 elliptic curve for secure key agreement
-- **Forward Secrecy**: Ephemeral keypairs generated per envelope
-- **HKDF Key Derivation**: HKDF-SHA256 for secure key generation from shared secret
-- **Payload Hash Verification**: SHA-256 hashing ensures data integrity during decryption
-- **Memory Safety**: Sensitive data is securely cleared from memory after use
-
 ## Configuration
 
 ### Required Configuration
@@ -305,8 +285,6 @@ $config = [
 ```php
 $config = [
     // ... required fields above
-    
-    'version' => '1.0',
     
     'custom_tags' => ['teaching', 'priority-review'],
     
@@ -351,35 +329,6 @@ $config = [
     ],
 ];
 ```
-
-## DICOM Processing
-
-The library automatically:
-
-1. **Scans DICOM folders** recursively for `.dcm` files
-2. **Detects DICOM files** by checking for the `DICM` magic number at offset 128
-3. **Extracts metadata** including:
-   - Patient information (name, ID, DOB, sex)
-   - Study details (description, UID, modalities)
-   - Series information (UIDs, body parts, instance counts)
-4. **Merges data** from multiple DICOM files intelligently
-5. **Validates output** against JSON schemas
-
-### DICOM Parsing
-
-In order to extract file information to build the files list, DCMTK is required.
-
-Without this, the library will not extract DICOM data.
-
-```bash
-# Install DCMTK on macOS
-brew install dcmtk
-
-# Install DCMTK on Ubuntu
-apt-get install dcmtk
-```
-
-The library will automatically use `dcmdump` if available.
 
 ## Output Structure
 

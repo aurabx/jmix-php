@@ -442,41 +442,6 @@ composer phpstan    # Static analysis
 composer psalm      # Additional static analysis
 ```
 
-## Security Considerations
-
-### ✅ Production-Ready Security Features
-
-This library includes **enterprise-grade encryption** that is production-ready:
-
-- **AES-256-GCM encryption** with authenticated encryption
-- **ECDH key exchange** using Curve25519 elliptic curve
-- **HKDF key derivation** with SHA-256
-- **Forward secrecy** through ephemeral keypairs
-- **Payload integrity verification** with SHA-256 hashing
-- **Memory safety** with secure key clearing
-
-### ⚠️ Additional Production Considerations
-
-For **production use**, you should also consider:
-
-1. **Key Management**:
-   - Use hardware security modules (HSMs) for key storage
-   - Implement proper key rotation and expiration handling
-   - Secure key distribution mechanisms
-
-2. **Digital Signatures** (currently placeholders):
-   - Integrate with `web-token/jwt-framework` for JWT/JWS signatures
-   - Use `paragonie/constant_time_encoding` for secure encoding
-
-3. **Certificate Authority Integration**:
-   - Integrate with a certificate authority for directory attestations
-   - Implement certificate validation and revocation checking
-
-4. **Compliance**:
-   - Ensure compliance with healthcare data regulations (HIPAA, GDPR, etc.)
-   - Implement audit logging for all cryptographic operations
-   - Regular security assessments and penetration testing
-
 ## Contributing
 
 1. Fork the repository
@@ -491,13 +456,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Support
 
-- **Documentation**: [Full API Documentation](docs/)
 - **Issues**: [GitHub Issues](https://github.com/aurabx/jmix-php/issues)
-- **Email**: dev@aurabx.com
 
 ## Changelog
 
-### v2.0.0
+### v0.3.0
 - **🔒 Full AES-256-GCM encryption** with ECDH key exchange (Curve25519)
 - **🔓 Decryption and envelope extraction** capabilities
 - **📋 CLI tools** for analyzing, extracting, and decrypting envelopes
@@ -507,7 +470,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **🛡️ Memory safety** with secure key clearing
 - **Breaking changes**: Updated envelope structure and API
 
-### v1.0.0
+### v0.2.0
 - Initial release
 - DICOM folder processing
 - JMIX envelope generation

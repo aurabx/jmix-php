@@ -3,7 +3,6 @@
     "description": "PHP library for JMIX (JSON Medical Interchange) format - secure medical data exchange with cryptographic features",
     "type": "library",
     "license": "MIT",
-    "version": "2.0.0",
     "authors": [
         {
             "name": "AuraBox Development Team",

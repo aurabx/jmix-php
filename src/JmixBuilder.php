@@ -348,7 +348,7 @@ class JmixBuilder
     /**
      * Build studies information from DICOM metadata
      */
-    private function buildStudies(array $dicomMetadata): object
+    private function buildStudies(array $dicomMetadata): \stdClass
     {
         $studies = new \stdClass();
 

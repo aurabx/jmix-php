@@ -16,7 +16,8 @@ class JmixBuilderTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->builder = new JmixBuilder();
+        $schemaPath = dirname(__DIR__) . '/../jmix/schemas';
+        $this->builder = new JmixBuilder($schemaPath);
         $this->tempDir = sys_get_temp_dir() . '/jmix_test_' . uniqid('', true);
         mkdir($this->tempDir, 0755, true);
     }

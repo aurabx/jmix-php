@@ -191,6 +191,9 @@ The library includes command-line tools for building and processing envelopes:
 # Create unencrypted envelope
 jmix-build /path/to/dicom config.json /path/to/output
 
+# Create unencrypted envelope with a custom schema directory
+jmix-build /path/to/dicom config.json /path/to/output /absolute/or/relative/path/to/schemas
+
 # Create encrypted envelope (add encryption config to config.json)
 jmix-build /path/to/dicom encrypted-config.json /path/to/output
 ```
@@ -200,6 +203,9 @@ jmix-build /path/to/dicom encrypted-config.json /path/to/output
 ```bash
 # Analyze any envelope (shows encryption status, metadata, etc.)
 jmix-decrypt analyze /path/to/envelope.JMIX
+
+# Analyze and verify cryptographic assertions
+jmix-decrypt analyze /path/to/envelope.JMIX --verify-assertions
 ```
 
 Output:
@@ -249,6 +255,16 @@ Output:
 ```
 
 ## Configuration
+
+### Schema Validation and Schema Path
+
+- All generated JMIX components are validated against JSON Schemas: manifest.json, metadata.json, audit.json, and files.json (when present).
+- Default schema directory resolves to a sibling repository path: ../jmix/schemas (relative to this package).
+- You can override the schema path in both library and CLI:
+  - Library: new JmixBuilder('/path/to/schemas') and new JmixDecryptor('/path/to/schemas')
+  - CLI: jmix-build /dicom config.json /output /path/to/schemas
+
+If you keep the JMIX schema repository checked out one directory up, the defaults will work out of the box.
 
 ### Required Configuration
 
@@ -417,6 +433,9 @@ composer install
 ```
 
 ### Testing
+
+Samples are available under ./samples for demos and tests. Prefer writing to ./tmp per examples.
+
 ```bash
 # Run all tests
 composer test
@@ -442,6 +461,65 @@ composer phpstan    # Static analysis
 composer psalm      # Additional static analysis
 ```
 
+## Security Considerations
+
+### JWS Manifest Signing (optional)
+
+You can sign manifest.json with a compact JWS (EdDSA/Ed25519) for integrity and authenticity.
+
+- Add jws_signing_key (base64 Ed25519 private key) to your build configuration
+- The builder will add a security.jws reference and emit a manifest.jws file when saving
+- Verify with JwsHandler::verifyJws(jws, publicKey)
+
+Example (library):
+
+```php
+use AuraBox\Jmix\JmixBuilder;
+
+$config = [
+    // ... your existing config
+    'jws_signing_key' => '<base64-ed25519-private-key>',
+];
+
+$builder = new JmixBuilder();
+$envelope = $builder->buildFromDicom('/path/to/dicom', $config);
+$path = $builder->saveToFiles($envelope, './tmp/output', $config);
+// Outputs manifest.json and manifest.jws
+```
+
+### ✅ Production-Ready Security Features
+
+This library includes **enterprise-grade encryption** that is production-ready:
+
+- **AES-256-GCM encryption** with authenticated encryption
+- **ECDH key exchange** using Curve25519 elliptic curve
+- **HKDF key derivation** with SHA-256
+- **Forward secrecy** through ephemeral keypairs
+- **Payload integrity verification** with SHA-256 hashing
+- **Memory safety** with secure key clearing
+
+### ⚠️ Additional Production Considerations
+
+For **production use**, you should also consider:
+
+1. **Key Management**:
+   - Use hardware security modules (HSMs) for key storage
+   - Implement proper key rotation and expiration handling
+   - Secure key distribution mechanisms
+
+2. **Digital Signatures** (currently placeholders):
+   - Integrate with `web-token/jwt-framework` for JWT/JWS signatures
+   - Use `paragonie/constant_time_encoding` for secure encoding
+
+3. **Certificate Authority Integration**:
+   - Integrate with a certificate authority for directory attestations
+   - Implement certificate validation and revocation checking
+
+4. **Compliance**:
+   - Ensure compliance with healthcare data regulations (HIPAA, GDPR, etc.)
+   - Implement audit logging for all cryptographic operations
+   - Regular security assessments and penetration testing
+
 ## Contributing
 
 1. Fork the repository
@@ -458,21 +536,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Issues**: [GitHub Issues](https://github.com/aurabx/jmix-php/issues)
 
-## Changelog
-
-### v0.3.0
-- **🔒 Full AES-256-GCM encryption** with ECDH key exchange (Curve25519)
-- **🔓 Decryption and envelope extraction** capabilities
-- **📋 CLI tools** for analyzing, extracting, and decrypting envelopes
-- **🔐 Payload hash verification** for data integrity
-- **📁 JMIX envelope directory structure** compliance
-- **🧪 Forward secrecy** with ephemeral keypairs
-- **🛡️ Memory safety** with secure key clearing
-- **Breaking changes**: Updated envelope structure and API
-
-### v0.2.0
-- Initial release
-- DICOM folder processing
-- JMIX envelope generation
-- JSON schema validation
-- Basic cryptographic placeholders
+See CHANGELOG.md for the full history, including 0.3.0, 0.2.0, and 0.1.0 entries.

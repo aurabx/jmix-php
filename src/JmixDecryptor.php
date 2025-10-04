@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace AuraBox\Jmix;
 
+use AuraBox\Jmix\Assertions\AssertionBuilder;
 use AuraBox\Jmix\Encryption\PayloadEncryptor;
 use AuraBox\Jmix\Exceptions\JmixException;
+use AuraBox\Jmix\Validation\SchemaValidator;
 
 /**
  * Handles decryption and extraction of JMIX envelopes
@@ -13,10 +15,12 @@ use AuraBox\Jmix\Exceptions\JmixException;
 class JmixDecryptor
 {
     private PayloadEncryptor $payloadEncryptor;
+    private ?string $schemaPath;
 
-    public function __construct()
+    public function __construct(?string $schemaPath = null)
     {
         $this->payloadEncryptor = new PayloadEncryptor();
+        $this->schemaPath = $schemaPath;
     }
 
     /**
@@ -80,6 +84,9 @@ class JmixDecryptor
             $this->verifyPayloadHash($encryptedPayloadFile, $manifest['security']['payload_hash']);
         }
 
+        // Note: We don't verify decrypted payload hash against encrypted payload hash
+        // as they use different algorithms (directory structure vs file hash)
+
         // Copy manifest and audit to output directory
         $this->writeJsonFile($outputPath . '/manifest.json', $manifest);
         $this->writeJsonFile($outputPath . '/audit.json', $audit);
@@ -91,6 +98,15 @@ class JmixDecryptor
         }
 
         $metadata = $this->readJsonFile($metadataFile);
+
+        // Validate decrypted components against schemas (fix metadata only for validation)
+        $validator = new SchemaValidator($this->schemaPath);
+        $validator->validateManifest($manifest);
+        $validator->validateMetadata($this->fixMetadataObjects($metadata));
+        $validator->validateAudit($audit);
+
+        // Verify cryptographic assertions if present
+        $this->verifyAssertions($manifest);
 
         return [
             'manifest' => $manifest,
@@ -138,6 +154,11 @@ class JmixDecryptor
         // Copy all files to output directory
         $this->copyDirectory($envelopePath, $outputPath);
 
+        // Verify payload hash if present (for unencrypted envelopes only)
+        if (isset($manifest['security']['payload_hash'])) {
+            $this->verifyDecryptedPayloadHash($outputPath . '/payload', $manifest['security']['payload_hash']);
+        }
+
         // Read metadata
         $metadataFile = $outputPath . '/payload/metadata.json';
         if (!file_exists($metadataFile)) {
@@ -145,6 +166,15 @@ class JmixDecryptor
         }
 
         $metadata = $this->readJsonFile($metadataFile);
+
+        // Validate extracted components against schemas (fix metadata only for validation)
+        $validator = new SchemaValidator($this->schemaPath);
+        $validator->validateManifest($manifest);
+        $validator->validateMetadata($this->fixMetadataObjects($metadata));
+        $validator->validateAudit($audit);
+
+        // Verify cryptographic assertions if present
+        $this->verifyAssertions($manifest);
 
         return [
             'manifest' => $manifest,
@@ -217,6 +247,131 @@ class JmixDecryptor
         if (!hash_equals($expectedHash, $actualHash)) {
             throw new JmixException('Payload hash verification failed - data may be corrupted');
         }
+    }
+
+    /**
+     * Verify decrypted payload hash by recomputing directory structure hash
+     * @throws JmixException
+     */
+    private function verifyDecryptedPayloadHash(string $payloadDir, string $expectedHash): void
+    {
+        if (!str_starts_with($expectedHash, 'sha256:')) {
+            throw new JmixException('Unsupported payload hash format: ' . $expectedHash);
+        }
+
+        if (!is_dir($payloadDir)) {
+            throw new JmixException("Payload directory does not exist: {$payloadDir}");
+        }
+
+        // Recompute payload hash using same algorithm as EnvelopeWriter
+        $recalculatedHash = $this->calculatePayloadDirectoryHash($payloadDir);
+        
+        if (!hash_equals($expectedHash, $recalculatedHash)) {
+            throw new JmixException('Decrypted payload hash verification failed - content integrity compromised');
+        }
+    }
+
+    /**
+     * Calculate SHA-256 hash of payload directory structure (matches EnvelopeWriter logic)
+     * @throws JmixException
+     */
+    private function calculatePayloadDirectoryHash(string $payloadPath): string
+    {
+        $entries = [];
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($payloadPath, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST
+        );
+
+        $payloadPath = rtrim($payloadPath, '/');
+
+        // Collect all entries (files and directories) with their metadata
+        foreach ($iterator as $entry) {
+            $relativePath = substr($entry->getPathname(), strlen($payloadPath) + 1);
+
+            if ($entry->isDir()) {
+                // For directories, include path and type
+                $entries[$relativePath] = 'dir:' . $relativePath;
+            } elseif ($entry->isFile()) {
+                // For files, include path, size, and content hash
+                $fileSize = $entry->getSize();
+                $fileHash = hash_file('sha256', $entry->getPathname());
+                $entries[$relativePath] = 'file:' . $relativePath . ':' . $fileSize . ':' . $fileHash;
+            }
+        }
+
+        // Sort by path for consistent hash calculation
+        ksort($entries);
+
+        // Create a manifest of the entire directory structure
+        $manifest = '';
+        foreach ($entries as $path => $metadata) {
+            $manifest .= $metadata . "\n";
+        }
+
+
+        // Return SHA-256 hash prefixed with algorithm identifier
+        return 'sha256:' . hash('sha256', $manifest);
+    }
+
+    /**
+     * Verify cryptographic assertions in the manifest
+     * @throws JmixException
+     */
+    private function verifyAssertions(array $manifest): void
+    {
+        // Check if any assertions are present
+        $hasAssertions = false;
+        if (isset($manifest['sender']['assertion'])) {
+            $hasAssertions = true;
+        }
+        if (isset($manifest['requester']['assertion'])) {
+            $hasAssertions = true;
+        }
+        if (isset($manifest['receiver'])) {
+            foreach ($manifest['receiver'] as $receiver) {
+                if (isset($receiver['assertion'])) {
+                    $hasAssertions = true;
+                    break;
+                }
+            }
+        }
+
+        // If no assertions are present, skip verification
+        if (!$hasAssertions) {
+            return;
+        }
+
+        // Verify all assertions
+        $assertionBuilder = new AssertionBuilder();
+        $envelope = ['manifest' => $manifest];
+        $verificationResults = $assertionBuilder->verifyEnvelopeAssertions($envelope);
+        
+        if (!$verificationResults['valid']) {
+            $errorMessage = 'Cryptographic assertion verification failed';
+            if (!empty($verificationResults['errors'])) {
+                $errorMessage .= ': ' . implode(', ', $verificationResults['errors']);
+            }
+            throw new JmixException($errorMessage);
+        }
+    }
+
+    /**
+     * Fix metadata objects that were converted to empty arrays during JSON processing
+     */
+    private function fixMetadataObjects(array $metadata): array
+    {
+        // Fix studies field - should be an object, but becomes empty array when empty
+        if (isset($metadata['studies']) && is_array($metadata['studies']) && empty($metadata['studies'])) {
+            $metadata['studies'] = new \stdClass();
+        }
+        
+        // Fix extensions field - should be an object
+        if (isset($metadata['extensions']) && is_array($metadata['extensions']) && empty($metadata['extensions'])) {
+            $metadata['extensions'] = new \stdClass();
+        }
+        
+        return $metadata;
     }
 
     /**

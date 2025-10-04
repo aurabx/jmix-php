@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2025-10-04
+
+### Added
+- Schema validation during decrypt/extract paths in JmixDecryptor
+  - Validates manifest.json, metadata.json, and audit.json against schemas
+  - Clear, aggregated error messages on validation failure
+- Payload hash verification improvements
+  - Encrypted envelopes: verify SHA-256 of payload.encrypted
+  - Unencrypted envelopes: recompute structured directory hash for payload/
+- Assertion verification enhancements
+  - Expiration handling and invalid-signature detection
+  - CLI support: `jmix-decrypt analyze --verify-assertions` prints verification summary
+- Configurable schema path
+  - Library: pass custom schema directory to `new JmixBuilder($schemaPath)` and `new JmixDecryptor($schemaPath)`
+  - CLI: optional 4th arg to `jmix-build` to set schema directory
+  - Default schema path resolves to a sibling repo: `../jmix/schemas`
+- JWS manifest signing (optional)
+  - `JwsHandler` to create/verify EdDSA (Ed25519) JWS for manifest.json
+  - When configured, `manifest.jws` is written alongside `manifest.json` and referenced in `manifest.security.jws`
+- Samples for tests and demos: `/samples` folder for CLI and PHPUnit
+
+### Changed
+- Documentation: README updated for schema path configuration, JWS signing, and CLI assertion verification
+- Minor CLI output polish in analyze/build commands
+
+### Testing
+- 43 PHPUnit tests covering builder, decryptor, assertions, encryption, and JWS
+
 ## [0.3.0] - 2025-09-27
 
 ### Added
